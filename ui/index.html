@@ -39,6 +39,8 @@
   <p class="quiet">The same requests and answers as TypeSafe's address, with no key needed. To group requests under a project or label, add it to the path: <code>/&lt;label&gt;/v1/systemone</code>.</p>
   <p class="eyebrow">Link a call to the answer that led to it</p>
   <p class="quiet">Each answer comes back with an event id in <code>events</code>. Send it with a later call in a <code>Jeview-Trigger</code> header and the map grows that call off the answer. Jeview drops the header before calling Jev.</p>
+  <p class="eyebrow">Show names, not keys</p>
+  <p class="quiet">Answers are labelled with their option's key. When the criteria behind the keys are objects, send <code>Jeview-Display: name</code> and the map shows that part of each option instead; an option without it keeps its key.</p>
   <p class="eyebrow">Where calls are kept</p>
   <p class="quiet" id="about-facts"></p>
   <p class="quiet">Nothing is stored anywhere else. Jeview runs on your computer, has no accounts and no tracking, and sends your requests to TypeSafe only.</p>

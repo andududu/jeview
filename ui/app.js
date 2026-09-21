@@ -51,8 +51,8 @@
     return null;
   }
   /** An answer in its own terms, in a few words. */
-  function answerWords(q) {
-    if (q.choice !== undefined) return q.choice === "none" ? "none of the options" : human(q.choice);
+  function answerWords(q, record) {
+    if (q.choice !== undefined) return q.choice === "none" ? "none of the options" : nameOf(record?.label, kindOf(q.id), q.choice);
     if (q.noul !== undefined) return `${pct(q.noul)} yes`;
     if (q.score !== undefined) return `${q.score.toFixed(2)}${q.levels ? ` of ${q.levels - 1}` : ""}`;
     return "no answer";
@@ -79,6 +79,29 @@
     const missing = data.older ? ids.filter((id) => !data.byId.has(id)).slice(0, 1000) : []; // with nothing older, what is not here does not exist
     if (!missing.length) return;
     try { for (const record of (await (await fetch(`/_/api/records?ids=${missing.join(",")}`)).json()).records) if (!data.byId.has(record.id)) data.byId.set(record.id, record); } catch { /* listed without them */ }
+  }
+  // ---------- an option's name ----------
+  // An option is shown by its key, unless the call said in a Jeview-Display header which part of its criteria to show
+  // instead. The names are not in the summaries: they are read once, from one whole call that carries the header, and then
+  // hold for that question in that run, earlier calls included. Another run may hang other things on the same keys, so it
+  // keeps its own names, or its keys. An option without that part keeps its key (null here, so it is not looked for again).
+  const labels = new Map(), fields = new Map(), learning = new Set();
+  const scopeOf = (run, question) => `${run}\u0000${question}`;
+  const dig = (value, path) => path.split(".").reduce((part, key) => (part && typeof part === "object" ? part[key] : undefined), value);
+  const labelIn = (value, field) => { const part = field ? dig(value, field) : undefined; return typeof part === "string" && part.trim() ? part.trim() : typeof part === "number" ? String(part) : null; };
+  const fieldFor = (record, qid) => record.display?.[qid] ?? record.display?.[kindOf(qid)] ?? record.display?.["*"];
+  /** What an answer is called in a run: `question` is the question's name, as `kindOf` gives it. */
+  const nameOf = (run, question, key) => labels.get(scopeOf(run, question))?.get(key) ?? human(key);
+  async function learn(record, q) {
+    const scope = scopeOf(record.label, kindOf(q.id)), field = fieldFor(record, q.id);
+    if (!field || q.choice === undefined || learning.has(scope) || (fields.get(scope) === field && labels.get(scope)?.has(q.choice))) return;
+    learning.add(scope);
+    try {
+      const criteria = (await fullRecord(record.id)).request?.questions?.[q.id]?.criteria, known = fields.get(scope) === field ? labels.get(scope) : new Map();
+      for (const [key, value] of Object.entries(criteria && typeof criteria === "object" ? criteria : {})) known.set(key, labelIn(value, field));
+      if (!known.has(q.choice)) known.set(q.choice, null);
+      labels.set(scope, known); fields.set(scope, field); renderCorner(true); // the map measures its labels again by itself
+    } catch { /* shown by their keys */ } finally { learning.delete(scope); }
   }
   async function fullRecord(id) {
     if (!data.full.has(id)) { const response = await fetch(`/_/api/records/${id}`); if (!response.ok) throw Error(`Call ${id} could not be read`); data.full.set(id, await response.json()); }
@@ -182,6 +205,7 @@
   function reveal(body, now = performance.now()) { if (!body.revealed) { body.revealed = true; body.born = now; } }
   function land(record, target) {
     target.kind.count++; target.option.count++; target.option.ids.push(record.id); target.kind.asked.push({ q: target.q, record });
+    target.kind.run = record.label; void learn(record, target.q);
     for (const o of target.kind.options.values()) { const p = probabilityOf(target.q, o.name); if (p !== null) o.latest = p; } // the latest spread across every answer
   }
   /** A new answer lights its dot up; it cools back over two seconds, whatever lands after it. */
@@ -262,7 +286,7 @@
       kind.w = Math.max(kind.R * 2, kind.textW) + 10; kind.h = kind.R * 2 + 6 + kind.lines.length * Q_LINE + 4;
       for (const o of kind.options.values()) {
         o.r += (ANSWER_R - o.r) * grow; o.R = ANSWER_R; // one size for every answer, reserved before it shows: it carries its latest probability
-        const labelText = clip(human(o.name), 28), okey = `${labelText}|${colors.body}`;
+        const labelText = clip(nameOf(kind.run, kind.name, o.name), 28), okey = `${labelText}|${colors.body}`;
         if (o.labelKey !== okey) { o.label = labelText; o.labelW = textWidth(labelText, A_SIZE, 400); o.labelKey = okey; }
         o.w = Math.max(o.R * 2, o.labelW) + 8; o.h = o.R * 2 + 4 + 16;
       }
@@ -795,7 +819,7 @@
     if (!hover || hover.kind === "question") return hideTip(); // a hovered question shows itself whole on the map
     if (hover.kind === "invalid") showTip(event.clientX, event.clientY, h("b", {}, "Invalid"), ` · ${plural(hover.node.count, "call")} Jev rejected`, h("div", { class: "sub" }, "Click to see them"));
     else if (hover.kind === "jev") showTip(event.clientX, event.clientY, h("b", {}, "Jev"), h("div", { class: "sub" }, `${plural(data.records.filter(visible).length, "call")} so far`));
-    else { const o = hover.node; showTip(event.clientX, event.clientY, h("b", {}, human(o.name)), ` · chosen ${plural(o.count, "time")}`, h("div", { class: "sub" }, `${typeof o.latest === "number" ? `Jev's latest probability ${pct(o.latest)}. ` : ""}${o.count ? "Click for the calls behind it" : ""}`)); }
+    else { const o = hover.node, called = nameOf(o.kind.run, o.kind.name, o.name); showTip(event.clientX, event.clientY, h("b", {}, called), ` · chosen ${plural(o.count, "time")}`, h("div", { class: "sub" }, `${called === human(o.name) ? "" : `Its key is ${o.name}. `}${typeof o.latest === "number" ? `Jev's latest probability ${pct(o.latest)}. ` : ""}${o.count ? "Click for the calls behind it" : ""}`)); }
   });
   canvas.addEventListener("pointerleave", () => { hover = null; hideTip(); });
   canvas.addEventListener("click", (event) => {
@@ -803,7 +827,7 @@
     const hit = nodeAt(...toWorld(event.clientX, event.clientY));
     if (!hit) { if (drawer.classList.contains("open")) closeDrawer(); else focus(null); return; }
     if (hit.kind === "invalid") openList("Invalid calls", "Calls Jev rejected, newest first", [...hit.node.ids].reverse());
-    else if (hit.kind === "answer") openList(human(hit.node.name), `${plural(hit.node.count, "time")} the answer to: ${hit.node.kind.asks || human(hit.node.kind.name)}`, [...hit.node.ids].reverse());
+    else if (hit.kind === "answer") openList(nameOf(hit.node.kind.run, hit.node.kind.name, hit.node.name), `${plural(hit.node.count, "time")} the answer to: ${hit.node.kind.asks || human(hit.node.kind.name)}`, [...hit.node.ids].reverse());
     else if (hit.kind === "question") { if (hit.node.pin) release(hit.node); else focus(hit.node.key); } // moved by hand: a click puts it back
     else { data.tab = "recent"; data.focus = null; renderCorner(true); }
   });
@@ -834,7 +858,7 @@
   /** Where a branch grows from, in words: "after no to <question>". */
   const after = (kind) => {
     if (!kind.parent) return "";
-    const answers = [...kind.parents].map((a) => `“${human(a.name)}”`), shown = answers.slice(0, 3).join(" or ") + (answers.length > 3 ? ` or ${answers.length - 3} more` : "");
+    const answers = [...kind.parents].map((a) => `“${nameOf(a.kind.run, a.kind.name, a.name)}”`), shown = answers.slice(0, 3).join(" or ") + (answers.length > 3 ? ` or ${answers.length - 3} more` : "");
     return `after ${shown} to ${clip(kind.parent.kind.asks || human(kind.parent.kind.name), 48)}`;
   };
   function bins(values, count, lo, hi) { const b = new Array(count).fill(0); for (const v of values) b[Math.min(count - 1, Math.max(0, Math.floor(((v - lo) / (hi - lo)) * count)))]++; return b; }
@@ -847,8 +871,9 @@
         n ? h("svg:rect", { x: i * (bar + gap), y: height - barHeight, width: bar, height: barHeight, rx: 1.5, class: "bar" }) : h("svg:rect", { x: i * (bar + gap), y: height - 1, width: bar, height: 1, class: "base" })); }));
   }
   function share(name, count, total, ids, extra) {
-    return h("button", { class: "share", onclick: () => ids.length && openList(human(name), `${plural(count, "time")} the answer to: ${world.kinds.get(data.focus)?.asks ?? ""}`, [...ids].reverse()) },
-      h("span", { class: "name" }, human(name), extra ? h("small", {}, extra) : null), h("span", { class: "n" }, `${count} · ${pct(total ? count / total : 0)}`),
+    const focused = world.kinds.get(data.focus), called = nameOf(focused?.run, focused?.name, name);
+    return h("button", { class: "share", onclick: () => ids.length && openList(called, `${plural(count, "time")} the answer to: ${world.kinds.get(data.focus)?.asks ?? ""}`, [...ids].reverse()) },
+      h("span", { class: "name" }, called, extra ? h("small", {}, extra) : null), h("span", { class: "n" }, `${count} · ${pct(total ? count / total : 0)}`),
       h("span", { class: "track" }, h("i", { style: `width:${total ? (count / total) * 100 : 0}%` })));
   }
   function questionStats(key) {
@@ -889,7 +914,7 @@
     return h("li", { "data-id": record.id, class: data.selected?.id === record.id ? "here" : "" }, h("button", { onclick: () => openCall(record.id) },
       h("span", { class: "what" }, h("span", { class: `mark-dot${failed(record) ? " failed" : ""}` }), h("span", {}, headline(record))),
       h("span", { class: "when", "data-at": finished(record) }, ago(finished(record))),
-      h("span", { class: "sub" }, failed(record) ? "Jev rejected the call" : [q ? answerWords(q) : "no answer", ...record.questions.filter((item) => item !== q).slice(0, 2).map(answerWords)].join(" · ") + (record.questions.length > 3 ? ` · +${record.questions.length - 3}` : ""))));
+      h("span", { class: "sub" }, failed(record) ? "Jev rejected the call" : [q ? answerWords(q, record) : "no answer", ...record.questions.filter((item) => item !== q).slice(0, 2).map((item) => answerWords(item, record))].join(" · ") + (record.questions.length > 3 ? ` · +${record.questions.length - 3}` : ""))));
   }
   /** New calls pile onto the top of the recent list without redrawing the rows already there. */
   function pileUp(records) {
@@ -951,7 +976,7 @@
   function brief(record) {
     const q = record.questions.find((item) => landing(item) !== null);
     if (failed(record) || !q) return [h("span", { class: "mark-dot failed" }), h("span", {}, clip(headline(record), 58), " ", h("b", {}, failed(record) ? "→ failed" : "→ no answer"))];
-    return [h("span", { class: "mark-dot" }), h("span", {}, clip(questionOf(q), 58), " ", h("b", {}, `→ ${answerWords(q)}`), record.questions.length > 1 ? ` +${record.questions.length - 1}` : "")];
+    return [h("span", { class: "mark-dot" }), h("span", {}, clip(questionOf(q), 58), " ", h("b", {}, `→ ${answerWords(q, record)}`), record.questions.length > 1 ? ` +${record.questions.length - 1}` : "")];
   }
   function openList(title, subtitle, ids, back = false) {
     visit({ list: [title, subtitle, ids] }, back);
@@ -979,13 +1004,16 @@
   }
   /** One question's answer. In a call with one question the title already asks it, so it is not repeated; in a call
    * with several, each is numbered. */
-  function answerBlock(question, answer, alone, n) {
+  function answerBlock(question, answer, alone, n, field) {
     const type = question?.type, parts = [h("p", { class: alone ? "q quiet-q" : "q" }, questionText(question?.instructions, !alone))];
     const block = (content) => alone ? h("div", { class: "qa" }, content) : h("div", { class: "qa numbered" }, h("span", { class: "num" }, String(n)), h("div", {}, content));
     if (!answer) return block([parts, h("p", { class: "a" }, "No answer")]);
     if (type === "choice") {
-      parts.push(h("p", { class: "a" }, answer.choice === "none" ? "None of the options" : human(answer.choice)), meter(answer.confidence, `Jev's confidence ${pct(answer.confidence)}`),
-        options(Object.entries(question.criteria || {}).map(([name, description]) => ({ name: human(name), description, p: answer.probabilities?.[name], chosen: name === answer.choice }))));
+      const called = (key) => labelIn(question.criteria?.[key], field) ?? human(key);
+      // an option that is a whole object is described by its description, if it has one, not by its JSON
+      const described = (value) => (value && typeof value === "object" && typeof value.description === "string" ? value.description : value);
+      parts.push(h("p", { class: "a" }, answer.choice === "none" ? "None of the options" : called(answer.choice)), meter(answer.confidence, `Jev's confidence ${pct(answer.confidence)}`),
+        options(Object.entries(question.criteria || {}).map(([name, description]) => ({ name: called(name), description: described(description), p: answer.probabilities?.[name], chosen: name === answer.choice }))));
     } else if (type === "noul") {
       parts.push(h("p", { class: "a" }, `${pct(answer.noul)} yes`), meter(answer.noul, "Jev's probability that the answer is yes"),
         question.criteria ? options([{ name: "Yes", description: question.criteria.true, p: answer.noul, chosen: answer.noul >= 0.5 }, { name: "No", description: question.criteria.false, p: 1 - answer.noul, chosen: answer.noul < 0.5 }]) : null);
@@ -1014,8 +1042,8 @@
     if (!record.trigger && !children.length) return null;
     const link = (call, words) => h("button", { class: "link", onclick: () => openCall(call.id) }, words);
     return h("div", { class: "chain" },
-      record.trigger ? [h("p", { class: "eyebrow" }, "Triggered by"), parent?.q ? link(parent.call, [clip(questionOf(parent.q), 90), " ", h("b", {}, `→ ${answerWords(parent.q)}`)]) : h("p", { class: "quiet" }, `${record.trigger}, which is not recorded here`)] : null,
-      children.length ? [h("p", { class: "eyebrow" }, "Led to"), children.map((child) => { const via = eventCall(child.trigger)?.q, q = child.questions[0]; return link(child, [via ? h("b", {}, `${answerWords(via)} → `) : null, clip(q ? questionOf(q) : "a call", 90)]); })] : null);
+      record.trigger ? [h("p", { class: "eyebrow" }, "Triggered by"), parent?.q ? link(parent.call, [clip(questionOf(parent.q), 90), " ", h("b", {}, `→ ${answerWords(parent.q, parent.call)}`)]) : h("p", { class: "quiet" }, `${record.trigger}, which is not recorded here`)] : null,
+      children.length ? [h("p", { class: "eyebrow" }, "Led to"), children.map((child) => { const via = eventCall(child.trigger)?.q, q = child.questions[0]; return link(child, [via ? h("b", {}, `${answerWords(via, record)} → `) : null, clip(q ? questionOf(q) : "a call", 90)]); })] : null);
   }
 
   async function openCall(id, back = false) {
@@ -1055,7 +1083,7 @@
       h("div", { class: "d-head" }, h("h2", { class: "d-title" }, alone && record.questions[0] ? questionOf(record.questions[0]) : entries.length ? `${entries.length} questions in one call` : headline(record)), viewState),
       state,
       errorText ? h("div", { class: "notice" }, `Jev did not answer: ${text(errorText)}`) : null,
-      entries.map(([qid, question], i) => answerBlock(question, answers[qid], alone, i + 1)),
+      entries.map(([qid, question], i) => answerBlock(question, answers[qid], alone, i + 1, fieldFor(record, qid) ?? fields.get(scopeOf(record.label, kindOf(qid))))),
       chainLinks(record),
       h("div", { class: "actions" },
         toggle("Details", () => h("dl", { class: "facts" },

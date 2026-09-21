@@ -47,6 +47,10 @@ requests and the same answers, with no key needed from the caller.
 - **Link calls.** Every answer comes back with an event id in `events`. When a later request follows from one of
   those answers, send its event id in a `Jeview-Trigger` header, and the map grows that request off the answer.
   Jeview drops its own headers before calling Jev and sends the body on unchanged.
+- **Show names, not keys.** The map labels each answer with its option's key, such as `c14`. When the criteria behind
+  the keys are objects, a `Jeview-Display` header says which part to show instead: `Jeview-Display: name`, or a field
+  per question, `Jeview-Display: category=name, kind=title`. An option without that field keeps its key, and so does
+  everything sent without the header. The header is only for show: one that cannot be read is ignored, never refused.
 
 Agents can read `http://127.0.0.1:4777/llms.txt`: a running Jeview serves it with its own address and whether a key is
 set. [llms.txt](llms.txt) here is the same text, for the default address.
