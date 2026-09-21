@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jeview</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23ff5c00'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/_/ui/app.css">
+<script src="/_/ui/app.js" defer></script>
+</head>
+<body>
+<canvas id="map" aria-label="Live map of Jev calls: Jev in the centre, the questions it is asked around it, and the answers it gave around each question"></canvas>
+
+<header class="bar">
+  <div class="brand">
+    <span id="pulse" class="pulse" data-tip="Connecting"></span>
+    <span class="title">Jeview</span>
+  </div>
+  <div class="tools">
+    <button id="find" class="icon" aria-label="Search calls" data-tip="Search">
+      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M13 13l4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
+    <button id="settings" class="icon" aria-label="Settings" aria-expanded="false" data-tip="Settings">
+      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M3 6h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="7" cy="6" r="2.2" fill="var(--paper)" stroke="currentColor" stroke-width="1.6"/><circle cx="13" cy="14" r="2.2" fill="var(--paper)" stroke="currentColor" stroke-width="1.6"/></svg>
+    </button>
+    <button id="about" class="icon" aria-label="How to use" aria-expanded="false" data-tip="How to use">i</button>
+  </div>
+</header>
+
+<div id="about-panel" class="popover" hidden>
+  <p class="eyebrow">Send Jev requests here</p>
+  <p class="line"><code id="run-line">http://127.0.0.1:4777/v1/systemone</code><button class="ghost small" data-copy="run-line">Copy</button></p>
+  <p class="quiet">The same requests and answers as TypeSafe's address, with no key needed. To name a run, add a label: <code>/&lt;label&gt;/v1/systemone</code>.</p>
+  <p class="eyebrow">Link a call to the answer that led to it</p>
+  <p class="quiet">Each answer comes back with an event id in <code>events</code>. Send it with a later call in a <code>Jeview-Trigger</code> header and the map grows that call off the answer. Jeview drops the header before calling Jev.</p>
+  <p class="eyebrow">Where calls are kept</p>
+  <p class="quiet" id="about-facts"></p>
+  <p class="quiet">For agents and scripts: <a href="/llms.txt" target="_blank" rel="noopener">llms.txt</a> explains how to connect.</p>
+</div>
+
+<div id="settings-panel" class="popover" hidden>
+  <p class="eyebrow">Jev key</p>
+  <p id="key-state"></p>
+  <form id="key-form" class="key-form" autocomplete="off">
+    <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste a TypeSafe API key" aria-label="TypeSafe API key">
+    <button class="ghost small" type="submit">Use this key</button>
+  </form>
+  <p class="notice" id="key-error" hidden></p>
+  <button id="key-remove" class="ghost small" type="button" hidden>Remove the key</button>
+  <p class="quiet note">Every Jev call uses this key. It stays on this computer and is never shown again.</p>
+</div>
+
+<button id="nokey" class="nokey" hidden>Add your Jev key to start</button>
+
+<div id="empty" class="empty" hidden>
+  <p class="display">Waiting for <em>Jev</em></p>
+  <p class="quiet">Send Jev requests to this address (/v1/systemone) and each call lands here as it happens.</p>
+</div>
+
+<section id="corner" class="corner" aria-label="Recent calls and question stats"></section>
+
+<div id="layout-panel" class="popover layout-menu" hidden>
+  <p class="eyebrow">Layout</p>
+  <button id="traces" class="switch-row" type="button" role="switch" aria-checked="true">
+    <span class="words"><b>Traces</b><span class="note">A question a call triggered grows off the answer that led to it. Off, every question hangs straight off Jev.</span></span>
+    <span class="switch" aria-hidden="true"></span>
+  </button>
+  <button id="dedupe" class="switch-row" type="button" role="switch" aria-checked="false">
+    <span class="words"><b>Deduplicate</b><span class="note">The same question after several answers to one question is a single node, joined to each of them.</span></span>
+    <span class="switch" aria-hidden="true"></span>
+  </button>
+  <button id="colours" class="switch-row" type="button" role="switch" aria-checked="true">
+    <span class="words"><b>Colours</b><span class="note">Each tree in its own colour; branches off the same question are shades of it.</span></span>
+    <span class="switch" aria-hidden="true"></span>
+  </button>
+  <button id="autozoom" class="switch-row" type="button" role="switch" aria-checked="true">
+    <span class="words"><b>Auto zoom</b><span class="note">Keep the whole map in view. Zooming or panning turns it off; a double click turns it back on.</span></span>
+    <span class="switch" aria-hidden="true"></span>
+  </button>
+</div>
+<footer class="foot">
+  <div class="zoom">
+    <button id="layout" class="icon" aria-label="Layout" aria-expanded="false">
+      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M5 10h4.5M9.5 10l4-4.5M9.5 10l4 4.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="4.5" cy="10" r="2" fill="currentColor"/><circle cx="14.5" cy="5" r="2" fill="currentColor"/><circle cx="14.5" cy="15" r="2" fill="currentColor"/></svg>
+    </button>
+    <button id="arrange" class="icon" aria-label="Arrange the map" data-tip="Arrange the whole map again, and put back anything moved by hand">
+      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="2.2" fill="currentColor"/><circle cx="10" cy="3.6" r="1.5" fill="currentColor"/><circle cx="15.5" cy="6.8" r="1.5" fill="currentColor"/><circle cx="15.5" cy="13.2" r="1.5" fill="currentColor"/><circle cx="10" cy="16.4" r="1.5" fill="currentColor"/><circle cx="4.5" cy="13.2" r="1.5" fill="currentColor"/><circle cx="4.5" cy="6.8" r="1.5" fill="currentColor"/></svg>
+    </button>
+    <button id="zoom-out" class="icon" aria-label="Zoom out" data-tip="Zoom out">−</button>
+    <button id="zoom-in" class="icon" aria-label="Zoom in" data-tip="Zoom in">+</button>
+    <button id="centre" class="icon" aria-label="Back to Jev" data-tip="Back to Jev, in the middle">
+      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="2.6" fill="currentColor"/><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
+  </div>
+</footer>
+
+<div id="search" class="search" hidden>
+  <input id="query" type="search" placeholder="Search what Jev saw and said" autocomplete="off" aria-label="Search calls">
+</div>
+
+<aside id="drawer" class="drawer" aria-hidden="true" inert>
+  <div class="d-bar">
+    <button id="back" class="icon" aria-label="Back" data-tip="Back" hidden>
+      <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M16 10H4M9 5l-5 5 5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="close" class="icon close" aria-label="Close">
+      <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  <div id="drawer-body"></div>
+</aside>
+<div id="tip" class="tip" role="tooltip" hidden></div>
+</body>
+</html>
