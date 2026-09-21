@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support Desk</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23ff5c00'/%3E%3C/svg%3E">
+<style>
+  :root { --bg: #111111; --panel: #171717; --raised: #202020; --ink: #ededeb; --muted: #b4b4b0; --dull: #8c8c88; --line: rgb(237 237 235 / 12%); --accent: #ff5c00; --red: #ff6b6b; --amber: #f0b429; --green: #5fd38d; --blue: #7aa7ff; --pink: #ff8fb1; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; overflow: hidden; background: var(--bg); color: var(--ink); font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px; }
+  .brand { display: flex; align-items: baseline; gap: 10px; font: 300 26px ui-serif, "New York", Georgia, serif; letter-spacing: -.02em; }
+  .brand .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); align-self: center; }
+  .brand small { font: 400 14px ui-sans-serif, system-ui, sans-serif; color: var(--muted); letter-spacing: 0; }
+  .brand em { font-family: ui-serif, "New York", Georgia, serif; color: var(--accent); }
+  header a { color: var(--muted); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 13px; white-space: nowrap; }
+  header a:hover { color: var(--ink); border-color: rgb(237 237 235 / 30%); }
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding: 0 24px 14px; width: min(100%, 1100px); align-self: center; }
+  /* the four teams a conversation can be handed to */
+  .teams { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .team { background: var(--panel); border-radius: 14px; padding: 12px 14px; min-width: 0; border: 1px solid transparent; transition: border-color .5s, background .5s; }
+  .team.lit { border-color: var(--accent); background: #1d1713; }
+  .team .top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .team .name { font-size: 12px; color: var(--muted); }
+  .team .count { font: 300 24px ui-serif, "New York", Georgia, serif; font-variant-numeric: tabular-nums; }
+  .team .last { display: block; font-size: 12px; color: var(--dull); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 18px; }
+  /* the conversations, newest at the bottom, as in any chat */
+  .feed { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: 14px; }
+  .feed::before { content: ""; position: absolute; inset: 0 0 auto; height: 90px; background: linear-gradient(to bottom, var(--bg), transparent); z-index: 1; pointer-events: none; } /* older conversations fade out at the top (a mask would be repainted with every frame) */
+  .thread { background: var(--panel); border-radius: 16px; padding: 14px 16px; display: grid; gap: 10px; flex: none; animation: arrive .45s cubic-bezier(.2, .8, .2, 1); }
+  @keyframes arrive { from { opacity: 0; transform: translateY(18px); } }
+  .row { display: flex; gap: 10px; align-items: flex-end; }
+  .row.out { justify-content: flex-end; }
+  .avatar { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-content: center; font: 600 11px ui-sans-serif, system-ui, sans-serif; color: #111; background: #c9c9c4; }
+  .avatar.desk { background: var(--accent); color: #fff; }
+  .bubble { max-width: 78%; background: var(--raised); border-radius: 14px 14px 14px 4px; padding: 9px 13px; }
+  .bubble .who { margin: 0 0 2px; font-size: 12px; color: var(--muted); } .bubble .who small { margin-left: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; font-size: 10.5px; color: var(--dull); }
+  .bubble .text { margin: 0; }
+  .bubble.reply { background: #2a1a10; border: 1px solid rgb(255 92 0 / 28%); border-radius: 14px 14px 4px 14px; animation: arrive .35s cubic-bezier(.2, .8, .2, 1); }
+  .bubble.note { background: none; border: 1px dashed var(--line); color: var(--dull); font-size: 13px; }
+  /* what Jev decided about the message, one chip per answer, in the order the answers came */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 40px; min-height: 24px; align-items: center; }
+  .chip { font-size: 12px; border-radius: 999px; padding: 2px 10px; border: 1px solid var(--line); color: var(--muted); animation: pop .3s cubic-bezier(.2, 1.4, .4, 1); white-space: nowrap; }
+  @keyframes pop { from { opacity: 0; transform: scale(.7); } }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .chip.urgent { color: var(--red); border-color: rgb(255 107 107 / 45%); } .chip.today { color: var(--amber); border-color: rgb(240 180 41 / 40%); }
+  .chip.upset { color: var(--pink); border-color: rgb(255 143 177 / 40%); } .chip.article { color: var(--blue); border-color: rgb(122 167 255 / 40%); }
+  .chip.credit { color: var(--green); border-color: rgb(95 211 141 / 40%); } .chip.team { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .chip.was { text-decoration: line-through; opacity: .55; }
+  .reading { font-size: 12px; color: var(--dull); } .reading i { display: inline-block; width: 4px; height: 4px; margin-left: 3px; border-radius: 50%; background: var(--accent); animation: blink 1s infinite; } .reading i:nth-child(2) { animation-delay: .15s; } .reading i:nth-child(3) { animation-delay: .3s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  .waiting { align-self: center; color: var(--dull); font-size: 13px; }
+  footer { padding: 0 24px 16px; color: var(--dull); font-size: 12.5px; width: min(100%, 1100px); align-self: center; }
+  @media (max-width: 640px) { .teams { grid-template-columns: repeat(2, 1fr); } .team .last { display: none; } }
+  @media (prefers-reduced-motion: reduce) { .thread, .bubble.reply, .chip { animation: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot"></span>Support Desk <small>triaged by <em>Jev</em></small></div>
+  <a id="jeview" href="http://127.0.0.1:4777/" target="_blank" rel="noopener">Watch Jev think in Jeview ↗</a>
+</header>
+<main>
+  <section class="teams" id="teams" aria-label="Teams"></section>
+  <section class="feed" id="feed" aria-label="Conversations" aria-live="polite"><p class="waiting" id="waiting">Waiting for the first customer…</p></section>
+</main>
+<footer>Made-up customers. The replies are templates, filled in with what Jev decided.</footer>
+<script src="/support-desk.js"></script>
+</body>
+</html>

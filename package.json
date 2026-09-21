@@ -2,14 +2,18 @@
   "name": "jeview",
   "version": "0.1.0",
   "private": true,
-  "description": "A local middleman for Jev (TypeSafe) with a live view of every call.",
+  "description": "An unofficial local middleman for Jev (TypeSafe), with a live view of every call.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/andududu/jeview.git" },
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
     "start": "node jeview.ts",
     "demo": "node demo/pixel-knight.ts",
+    "demo:support": "node demo/support-desk.ts",
     "test": "node --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:pages": "node --check ui/app.js && node --check demo/game.js && node --check demo/support-desk.js"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

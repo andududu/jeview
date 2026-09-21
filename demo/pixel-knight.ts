@@ -320,6 +320,6 @@ for (;;) {
   if (game.turn >= shown + ahead && Date.now() - shownAt < 4000) { await sleep(15); continue; } // far enough ahead of the page
   let message;
   try { message = await turn(); } catch (error) { message = { type: "waiting", reason: `Jeview is not answering at ${proxy}: ${(error as Error).message}` }; }
-  broadcast(message ?? { type: "waiting", reason: "Jev did not answer. Is a Jev key set in Jeview's settings?" });
+  broadcast(message ?? { type: "waiting", reason: "Jev did not answer. Is a Jev key set in Jeview (the key icon, top right)?" });
   if (message?.type !== "turn") await sleep(3000); else if (pace) await sleep(pace);
 }
