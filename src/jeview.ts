@@ -24,7 +24,9 @@ const PAGE = 5000, IDS_LISTED = 1000; // summaries in one answer: a page of the 
 const REQUEST_DROP = new Set(["host", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "te", "trailer", "content-length", "accept-encoding", "authorization", "cookie", "origin", "referer"]);
 // fetch has already decoded the body, so its length and encoding no longer describe what is sent on
 const RESPONSE_DROP = new Set(["connection", "keep-alive", "transfer-encoding", "content-length", "content-encoding"]);
-const LOOPBACK = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/;
+// the names this machine goes by. Any name ending in .localhost is one of them: that ending is reserved for the machine
+// itself, so no other site can have it, and http://jeview.localhost:4777/ opens the viewer with no hosts entry
+const LOOPBACK = /^(127\.0\.0\.1|\[::1\]|([a-z0-9-]+\.)*localhost)(:\d+)?$/;
 /** A page on another site can POST here without asking first, and the call would go out with the user's key. A browser
  * names the page's site in Origin ("null" for a sandboxed one); a caller that is not a page sends none. */
 const foreign = (origin: string | undefined) => origin !== undefined && !LOOPBACK.test(origin.replace(/^https?:\/\//, ""));

@@ -175,6 +175,9 @@ test("the viewer answers loopback hosts only, serves its page, and a non-JSON bo
   const status = (host: string) => new Promise<number>((accept, reject) => httpRequest({ host: "127.0.0.1", port, path: "/_/api/records", headers: { host } }, (res) => { res.resume(); accept(res.statusCode ?? 0); }).on("error", reject).end());
   assert.equal(await status(`localhost:${port}`), 200);
   assert.equal(await status("attacker.example"), 403);
+  // a name ending in .localhost is this machine and nobody else's; a name that only looks like one is not
+  assert.deepEqual(await Promise.all([`jeview.localhost:${port}`, "my.jeview.localhost"].map(status)), [200, 200]);
+  assert.deepEqual(await Promise.all(["localhost.attacker.example", `jeview.localhost.attacker.example:${port}`, "attackerlocalhost", "jeview.localhost@attacker.example", ".localhost"].map(status)), [403, 403, 403, 403, 403]);
   const page = await fetch(`${base}/`);
   assert.equal(page.headers.get("content-type"), "text/html; charset=utf-8");
   assert.match(page.headers.get("content-security-policy") ?? "", /script-src 'self'/);
