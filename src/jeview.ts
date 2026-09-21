@@ -1,6 +1,6 @@
 // Jeview: a local middleman for Jev with a live view of every call (README.md). A client sends its Jev requests
-// here exactly as it would to TypeSafe (POST /v1/systemone, optionally /<label>/v1/systemone to name a run); the proxy
-// calls Jev with the key set in the viewer's settings (without a key, calls are refused), answers the client with
+// here exactly as it would to TypeSafe (POST /v1/systemone, or /<label>/v1/systemone to group requests); the proxy
+// calls Jev with the key set in the viewer (without a key, calls are refused), answers the client with
 // Jev's answer, and keeps each call whole in a private SQLite database. Loopback only: calls can hold private data.
 //
 // Every answer Jev gives gets an event id, "<call>:<question>", returned with the answers as `events`. A later request
@@ -20,10 +20,14 @@ export const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 export const JEV_USD_PER_INPUT_TOKEN = 0.042 / 1_000_000; // TypeSafe's rate for Jev; output tokens are free
 export const DATABASE = "jeview.sqlite";
 const BODY_LIMIT = 16 * 1024 * 1024;
+const PAGE = 5000, IDS_LISTED = 1000; // summaries in one answer: a page of the history, or the calls named by id (as many as a search finds)
 const REQUEST_DROP = new Set(["host", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "te", "trailer", "content-length", "accept-encoding", "authorization", "cookie", "origin", "referer"]);
 // fetch has already decoded the body, so its length and encoding no longer describe what is sent on
 const RESPONSE_DROP = new Set(["connection", "keep-alive", "transfer-encoding", "content-length", "content-encoding"]);
 const LOOPBACK = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/;
+/** A page on another site can POST here without asking first, and the call would go out with the user's key. A browser
+ * names the page's site in Origin ("null" for a sandboxed one); a caller that is not a page sends none. */
+const foreign = (origin: string | undefined) => origin !== undefined && !LOOPBACK.test(origin.replace(/^https?:\/\//, ""));
 const UI_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8" };
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'";
 
@@ -91,13 +95,12 @@ export function summarize(call: { id: number; at: string; label: string; trigger
 }
 
 /** Everything the proxy keeps, in one SQLite database in a folder private to the user: each call whole, in the order
- * calls finished (so a reader polling from a position never misses a slower call), and the viewer's settings. */
+ * calls finished (so a reader polling from a position never misses a slower call), and the Jev key. Nothing
+ * is held in memory, so a long history costs nothing to start with, and two Jeviews may share a folder. */
 export class JeviewStore {
   readonly dir: string;
   readonly database: string;
-  readonly summaries: JeviewSummary[] = [];
   private readonly db: DatabaseSync;
-  private next: number;
   constructor(dir: string) {
     this.dir = resolve(dir);
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
@@ -109,20 +112,39 @@ export class JeviewStore {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;
       CREATE TABLE IF NOT EXISTS calls ${calls};
       CREATE INDEX IF NOT EXISTS calls_trigger ON calls (trigger);
-      CREATE TABLE IF NOT EXISTS settings (name TEXT PRIMARY KEY, value TEXT NOT NULL);`);
-    for (const row of this.db.prepare("SELECT summary FROM calls ORDER BY seq").all()) this.summaries.push(JSON.parse(String(row.summary)) as JeviewSummary);
-    this.next = Number(this.db.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM calls").get()?.id ?? 0) + 1;
+      CREATE TABLE IF NOT EXISTS settings (name TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);`);
   }
-  allocate(): number { return this.next++; }
-  save(record: JeviewRecord): Promise<void> {
+  /** The next call id. A call is given its id when it starts and saved when it ends, so the ids in flight are counted
+   * in the database, in one statement: two Jeviews sharing a folder never hand out the same one. It also stays ahead
+   * of every id already saved, in case an older Jeview, which counted in memory, is writing to the same folder. */
+  allocate(): number {
+    return Number(this.db.prepare("INSERT INTO counters (name, value) VALUES ('call', (SELECT COALESCE(MAX(id), 0) + 1 FROM calls)) ON CONFLICT (name) DO UPDATE SET value = MAX(value, (SELECT COALESCE(MAX(id), 0) FROM calls)) + 1 RETURNING value").get()!.value);
+  }
+  save(record: JeviewRecord) {
     const { summary } = record;
     this.db.prepare("INSERT INTO calls (id, at, label, trigger, key, status, summary, request, response) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .run(summary.id, summary.at, summary.label, summary.trigger, summary.key, summary.status, JSON.stringify(summary), JSON.stringify(record.request), JSON.stringify(record.response));
-    this.summaries.push(summary);
-    return Promise.resolve();
   }
-  /** Every save is written before it returns; kept for callers that wait on it. */
-  flush(): Promise<void> { return Promise.resolve(); }
+  /** The position of the latest call: positions count calls in the order they finished. */
+  last(): number { return Number(this.db.prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM calls").get()!.seq); }
+  count(): number { return Number(this.db.prepare("SELECT COUNT(*) AS n FROM calls").get()!.n); }
+  /** Summaries after position `since`, at most `limit` at a time: `cursor` is the next `since`, and `more` says the
+   * next page is already there. A position from a database that has since been replaced falls back to this one's end. */
+  list(since: number, limit: number): { records: JeviewSummary[]; cursor: number; more: boolean } {
+    const rows = this.db.prepare("SELECT seq, summary FROM calls WHERE seq > ? ORDER BY seq LIMIT ?").all(since, limit + 1), page = rows.slice(0, limit);
+    return { records: page.map((row) => JSON.parse(String(row.summary)) as JeviewSummary), cursor: page.length ? Number(page.at(-1)!.seq) : Math.min(since, this.last()), more: rows.length > limit };
+  }
+  /** Where the latest `n` calls begin, and how many older calls come before them. */
+  latest(n: number): { since: number; older: number } {
+    const since = Math.max(0, this.last() - n);
+    return { since, older: since ? Number(this.db.prepare("SELECT COUNT(*) AS n FROM calls WHERE seq <= ?").get(since)!.n) : 0 };
+  }
+  /** The summaries of the calls with these ids, for a reader that has not loaded them. */
+  summariesOf(ids: number[]): JeviewSummary[] {
+    if (!ids.length) return [];
+    return this.db.prepare(`SELECT summary FROM calls WHERE id IN (${ids.map(() => "?").join(", ")}) ORDER BY id`).all(...ids).map((row) => JSON.parse(String(row.summary)) as JeviewSummary);
+  }
   read(id: number): JeviewRecord | null {
     const row = this.db.prepare("SELECT summary, request, response FROM calls WHERE id = ?").get(id);
     return row ? { summary: JSON.parse(String(row.summary)), request: JSON.parse(String(row.request)), response: JSON.parse(String(row.response)) } : null;
@@ -180,16 +202,18 @@ export function llmsText(origin: string, keyed: boolean): string {
   return `# Jeview
 
 A local middleman for Jev (TypeSafe System One) at ${origin}, with a live view of every call at ${origin}/
-It calls Jev with the Jev key set in the viewer's settings and keeps each call whole (what was asked, what Jev saw,
-what it answered) in a SQLite database on this machine.
+It is a gateway, not a model: it sits between a Jev client and TypeSafe and answers nothing itself. Each request it
+receives goes on to Jev with the Jev key set in the viewer, Jev's answer goes back to the caller, and the call is kept
+whole (what was asked, what Jev saw, what it answered) in a SQLite database on this machine. Nothing is stored anywhere
+else: Jeview runs locally, and TypeSafe is the only place it sends anything.
 
-The Jev key: ${keyed ? "set." : `not set yet, so calls are refused. Set it in the viewer's settings at ${origin}/.`}
+The Jev key: ${keyed ? "set." : `not set yet, so calls are refused. Set it in the viewer at ${origin}/ (the key icon, top right).`}
 
 ## Send Jev requests here
 
 Use ${origin}/v1/systemone wherever you would use https://api.typesafe.ai/v1/systemone: the same body
-{ model, state, questions }, the same answers. No key is needed from the caller. To name a run, put a label in the
-path: ${origin}/<label>/v1/systemone.
+{ model, state, questions }, the same answers. No key is needed from the caller. To group requests under a project or
+label, add it to the path: ${origin}/<label>/v1/systemone.
 
 ## Link a question to the answer that led to it
 
@@ -198,11 +222,26 @@ When a later request follows from one of those answers, send its event id in a h
 The viewer then grows that request's questions as a branch off the answer that triggered them. Jeview drops its own
 headers before calling Jev, and sends the body on exactly as it came.
 
+## When a call is refused
+
+Whatever Jev answers, a refusal included, comes back as Jev sent it. Jeview's own refusals are JSON, { "error": "..." }:
+
+- 401: no Jev key is set.
+- 400: a Jeview-Trigger that is empty or longer than 200 characters.
+- 413: a body over ${BODY_LIMIT / 1024 / 1024} MB.
+- 502: Jev could not be reached, or its answer was cut short.
+- 403: the request came from a web page on another site. Jeview serves programs on this machine, not pages elsewhere.
+
+What Jev answered or refused is recorded, and so are the 401s and 502s. The 400s, 413s and 403s are not.
+
 ## Read what was recorded (JSON, from this machine only)
 
-- GET ${origin}/_/api/records?since=<n>: summaries in the order calls finished; "cursor" is the next "since".
+- GET ${origin}/_/api/records?since=<n>: summaries in the order calls finished, at most ${PAGE.toLocaleString("en")} at a time; "cursor" is
+  the next "since", and "more" says the next page is already there. ?latest=<n> starts at the latest n calls instead.
+- GET ${origin}/_/api/records?ids=<id>,<id>: the summaries of those calls, at most ${IDS_LISTED.toLocaleString("en")}.
 - GET ${origin}/_/api/records/<id>: one call, the request sent to Jev and the response it returned.
-- GET ${origin}/_/api/search?q=<words>: the ids of calls whose request or response contains every word.
+- GET ${origin}/_/api/search?q=<words>: the ids of the calls whose label, trigger, request or response contains every
+  word, newest first, at most 1,000.
 
 A record's "key" is the sha256 of the exact body sent to Jev.
 `;
@@ -232,18 +271,18 @@ export function createJeview(options: JeviewOptions): Jeview {
     const id = store.allocate(), at = new Date().toISOString(), started = Date.now();
     const keep = (status: number, text: string, error?: string) => {
       const responseValue = text ? parse(text) : null;
-      void store.save({ summary: summarize({ id, at, label, trigger, status, elapsedMs: Date.now() - started, ...(error ? { error } : {}) }, sent, requestValue, responseValue), request: requestValue, response: responseValue });
+      store.save({ summary: summarize({ id, at, label, trigger, status, elapsedMs: Date.now() - started, ...(error ? { error } : {}) }, sent, requestValue, responseValue), request: requestValue, response: responseValue });
     };
     const fail = (status: number, message: string) => { keep(status, "", message); return send(res, status, { error: message }); };
     const key = jevKey();
-    if (!key) return fail(401, `No Jev key: add one in the viewer's settings at http://${req.headers.host}/`);
+    if (!key) return fail(401, `No Jev key: add one in the viewer at http://${req.headers.host}/`);
     let response: Response;
     try { response = await request(jevEndpoint, { method: "POST", headers: { ...headers, authorization: `Bearer ${key}` }, body: new Uint8Array(sent), redirect: "manual" }); }
     catch (error) { return fail(502, `Jev unreachable: ${(error as Error).message}`); }
     let text: Buffer;
     try { text = Buffer.from(await response.arrayBuffer()); } catch (error) { return fail(502, `Jev's answer was cut short: ${(error as Error).message}`); }
     const responseHeaders: Record<string, string> = {};
-    response.headers.forEach((value, name) => { if (!RESPONSE_DROP.has(name)) responseHeaders[name] = value; });
+    response.headers.forEach((value, name) => { if (!RESPONSE_DROP.has(name) && !name.startsWith("access-control-")) responseHeaders[name] = value; }); // Jev's CORS grants are for its own address, not this one
     const returned = parse(text.toString("utf8"));
     // each answer's event id, for a later request to name as its trigger
     const events = object(returned) && object(returned.answers) ? Object.fromEntries(Object.keys(returned.answers).map((question) => [question, eventId(id, question)])) : null;
@@ -253,7 +292,6 @@ export function createJeview(options: JeviewOptions): Jeview {
     keep(response.status, text.toString("utf8"));
   }
 
-
   const server = createServer((req, res) => {
     void (async () => {
       // Host allowlist against DNS rebinding: a page on another site must not read the records through a local name.
@@ -262,6 +300,7 @@ export function createJeview(options: JeviewOptions): Jeview {
       // a Jev request: POST .../v1/systemone; whatever comes before names the run
       if (url.pathname.endsWith(JEV_PATH) && !url.pathname.startsWith("/_/")) {
         if (req.method !== "POST") return send(res, 405, { error: "Jev requests are POSTed" });
+        if (foreign(req.headers.origin)) return send(res, 403, { error: "Jev requests cannot come from a page on another site" }); // refused unrecorded: such a page could otherwise fill the database
         const segments = url.pathname.slice(0, -JEV_PATH.length).split("/").filter(Boolean).map(decodeURIComponent);
         if (segments.at(-1) === "typesafe") segments.pop(); // clients that add the vendor's name before its path
         return ask(req, res, segments.join("/"));
@@ -271,6 +310,9 @@ export function createJeview(options: JeviewOptions): Jeview {
         catch (error) { return send(res, (error as { status?: number }).status ?? 400, { error: (error as Error).message }); }
       }
       if (req.method !== "GET") return send(res, 405, { error: "Send Jev requests to /v1/systemone; the viewer is otherwise read-only" });
+      // a page on another site cannot read what the API answers, and should not get to make it search either; the viewer
+      // itself stays reachable, since a link to it from another site is that kind of request too
+      if (req.headers["sec-fetch-site"] === "cross-site" && url.pathname.startsWith("/_/api/")) return send(res, 403, { error: "The API is not for pages on other sites" });
       if (url.pathname === "/_/api/settings") return send(res, 200, keyView(jevKey()));
       if (url.pathname === "/llms.txt") {
         res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
@@ -284,8 +326,11 @@ export function createJeview(options: JeviewOptions): Jeview {
         return void res.end(content);
       }
       if (url.pathname === "/_/api/records") {
-        const since = Math.max(0, Number(url.searchParams.get("since")) || 0);
-        return send(res, 200, { cursor: store.summaries.length, records: store.summaries.slice(since), jev: endpoint.host, database: store.database, keyed: !!jevKey() });
+        const whole = (name: string) => Math.max(0, Math.floor(Number(url.searchParams.get(name)) || 0)), ids = url.searchParams.get("ids");
+        if (ids !== null) return send(res, 200, { records: store.summariesOf([...new Set(ids.split(",").map(Number).filter((id) => Number.isInteger(id) && id > 0))].slice(0, IDS_LISTED)) });
+        // everything after a position, or (for a viewer opening on a long history) only the latest calls; a page at a time
+        const from = whole("latest") ? store.latest(whole("latest")) : null;
+        return send(res, 200, { ...store.list(from ? from.since : whole("since"), Math.min(whole("limit") || PAGE, PAGE)), ...(from ? { older: from.older } : {}), jev: endpoint.host, database: store.database, keyed: !!jevKey() });
       }
       const one = /^\/_\/api\/records\/(\d+)$/.exec(url.pathname);
       if (one) { const record = store.read(Number(one[1])); return record ? send(res, 200, record) : send(res, 404, { error: "No such record" }); }

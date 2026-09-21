@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { createJeview, DATABASE, JEV_USD_PER_INPUT_TOKEN, type JeviewSummary } from "../src/jeview.ts";
+import { createJeview, DATABASE, JEV_USD_PER_INPUT_TOKEN, summarize, type JeviewSummary } from "../src/jeview.ts";
 
 type Seen = { method: string; url: string; headers: IncomingMessage["headers"]; body: string };
 type Hooks = { after(fn: () => unknown): void };
@@ -115,18 +115,45 @@ test("without a key a Jev request is refused and recorded; Jev's own refusals re
   const { base, store } = await proxy(t, upstream.url, { key: null });
   const refused = await fetch(`${base}/v1/systemone`, { method: "POST", body: jevBody });
   assert.equal(refused.status, 401);
-  assert.match(((await refused.json()) as { error: string }).error, /No Jev key: add one in the viewer's settings/);
+  assert.match(((await refused.json()) as { error: string }).error, /No Jev key: add one in the viewer at/);
   assert.equal(upstream.seen.length, 0);
 
   store.setSetting("jevKey", KEY);
   const busy = await fetch(`${base}/v1/systemone`, { method: "POST", body: jevBody });
   assert.equal(busy.status, 429);
   assert.equal(busy.headers.get("retry-after"), "2");
-  assert.deepEqual((await records(base)).records.map((r) => [r.status, r.error ?? null]), [[401, `No Jev key: add one in the viewer's settings at ${base}/`], [429, null]]);
+  assert.deepEqual((await records(base)).records.map((r) => [r.status, r.error ?? null]), [[401, `No Jev key: add one in the viewer at ${base}/`], [429, null]]);
 
   assert.equal((await fetch(`${base}/v1/systemone`)).status, 405);
   assert.equal((await fetch(`${base}/openrouter/api/v1/chat/completions`, { method: "POST", body: "{}" })).status, 405);
   assert.equal(upstream.seen.length, 1);
+});
+
+test("a page on another site cannot spend the key: refused before Jev and unrecorded, and Jev's CORS grants are not passed on", async (t) => {
+  const upstream = await jev(t, () => ({ body: jevAnswer, headers: { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-expose-headers": "x-request-id" } }));
+  const { base } = await proxy(t, upstream.url);
+  // what a page can send without asking first: a POST of plain text, with the page's site in Origin
+  const from = (origin?: string) => fetch(`${base}/run/v1/systemone`, { method: "POST", headers: { "content-type": "text/plain", ...(origin === undefined ? {} : { origin }) }, body: jevBody });
+  for (const origin of ["https://attacker.example", "http://attacker.example:4777", "null"]) {
+    const refused = await from(origin);
+    assert.equal(refused.status, 403);
+    assert.match(((await refused.json()) as { error: string }).error, /cannot come from a page on another site/);
+  }
+  assert.deepEqual([upstream.seen.length, (await records(base)).records.length], [0, 0]);
+
+  // a caller that is not a page sends no Origin; a page on this machine names a loopback one
+  for (const origin of [undefined, base, "http://localhost:3000"]) {
+    const answered = await from(origin);
+    assert.equal(answered.status, 200);
+    assert.deepEqual([answered.headers.get("access-control-allow-origin"), answered.headers.get("access-control-expose-headers")], [null, null]);
+  }
+  assert.deepEqual([upstream.seen.length, (await records(base)).records.length], [3, 3]);
+
+  // nor can such a page make the API search what is recorded, though it could not read the answer; the viewer itself
+  // still opens from a link on another site
+  const get = (path: string, site: string) => new Promise<number>((accept, reject) => httpRequest({ host: "127.0.0.1", port: new URL(base).port, path, headers: { "sec-fetch-site": site } }, (res) => { res.resume(); accept(res.statusCode ?? 0); }).on("error", reject).end());
+  assert.deepEqual(await Promise.all([get("/_/api/search?q=login", "cross-site"), get("/_/api/records", "cross-site"), get("/_/api/settings", "cross-site")]), [403, 403, 403]);
+  assert.deepEqual(await Promise.all([get("/_/api/search?q=login", "same-origin"), get("/_/api/records", "same-site"), get("/", "cross-site"), get("/llms.txt", "cross-site")]), [200, 200, 200, 200]);
 });
 
 test("an unreachable Jev is a recorded 502, and the proxy refuses itself as Jev", async (t) => {
@@ -187,6 +214,44 @@ test("calls survive a restart in the database, ids continue, and search reads ev
   assert.deepEqual(await search("100%"), [2]); // % and _ are literal, not wildcards
   assert.deepEqual(await search("jev-2026-09 bug_report"), [3, 2, 1]);
   assert.deepEqual(await search(""), []);
+});
+
+test("a long history is read a page at a time, from its latest calls if asked, and calls are found by id", async (t) => {
+  const upstream = await jev(t, () => ({ body: jevAnswer }));
+  const { base } = await proxy(t, upstream.url);
+  for (let i = 0; i < 5; i++) await fetch(`${base}/v1/systemone`, { method: "POST", body: jevBody });
+  type Page = { records: JeviewSummary[]; cursor: number; more: boolean; older?: number };
+  const page = async (query: string) => (await (await fetch(`${base}/_/api/records?${query}`)).json()) as Page;
+  const shape = ({ records, cursor, more, older }: Page) => [records.map((r) => r.id), cursor, more, older ?? null];
+
+  assert.deepEqual(shape(await page("since=0&limit=2")), [[1, 2], 2, true, null]);
+  assert.deepEqual(shape(await page("since=2&limit=2")), [[3, 4], 4, true, null]);
+  assert.deepEqual(shape(await page("since=4&limit=2")), [[5], 5, false, null]);
+  assert.deepEqual(shape(await page("since=5")), [[], 5, false, null]);
+  assert.deepEqual(shape(await page("since=99")), [[], 5, false, null]); // a position from another database comes back to this one's end
+  // a viewer opening on a long history asks for its latest calls, and is told how many came before
+  assert.deepEqual(shape(await page("latest=2")), [[4, 5], 5, false, 3]);
+  assert.deepEqual(shape(await page("latest=50")), [[1, 2, 3, 4, 5], 5, false, 0]);
+  assert.deepEqual(shape(await page("latest=3&limit=2")), [[3, 4], 4, true, 2]);
+  assert.deepEqual((await page("ids=5,2,2,nope,77")).records.map((r) => r.id), [2, 5]);
+});
+
+test("two Jeviews sharing a folder never hand out the same call id, and each shows the calls of both", async (t) => {
+  const upstream = await jev(t, () => ({ body: jevAnswer }));
+  const one = await proxy(t, upstream.url);
+  const two = await proxy(t, upstream.url, { key: null, dir: one.dir }); // the key is in the folder they share
+  const ask = (base: string) => fetch(`${base}/v1/systemone`, { method: "POST", body: jevBody }).then((response) => response.json()) as Promise<{ events: Record<string, string> }>;
+  const answers = await Promise.all([one, two, one, two, two, one].map(({ base }) => ask(base)));
+  assert.deepEqual(answers.map((answer) => answer.events.kind).sort(), ["1:kind", "2:kind", "3:kind", "4:kind", "5:kind", "6:kind"]);
+  for (const { base } of [one, two]) assert.deepEqual((await records(base)).records.map((r) => r.id).sort(), [1, 2, 3, 4, 5, 6]);
+  // an id given out by a Jeview that is still waiting for Jev is not given out again after a restart
+  assert.equal(one.store.allocate(), 7);
+  const three = await proxy(t, upstream.url, { key: null, dir: one.dir });
+  assert.equal(three.store.allocate(), 8);
+  // an older Jeview counted ids in memory: what it saves into the same folder is stepped over, not handed out again
+  const request = JSON.parse(jevBody) as unknown, response = JSON.parse(jevAnswer) as unknown;
+  one.store.save({ summary: summarize({ id: 20, at: new Date().toISOString(), label: "", trigger: null, status: 200, elapsedMs: 1 }, Buffer.from(jevBody), request, response), request, response });
+  assert.deepEqual([two.store.allocate(), three.store.allocate()], [21, 22]);
 });
 
 test("the Jev key is set from the viewer only, never shown, and used by every call; llms.txt says how to connect", async (t) => {
