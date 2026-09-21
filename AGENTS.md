@@ -1,6 +1,7 @@
 # Working on Jeview
 
-Jeview is a local gateway for Jev (TypeSafe System One) with a live viewer. To *use* a running Jeview, read
+Jeview is a local visualizer for Jev (TypeSafe System One): a gateway your code sends its calls through, with a live
+viewer. It is unofficial, and not affiliated with TypeSafe AI. To *use* a running Jeview, read
 [llms.txt](llms.txt), or `/llms.txt` on the Jeview itself. This file is for changing the code.
 
 ## The lie of the land

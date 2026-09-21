@@ -1,6 +1,6 @@
 # Jeview
 
-A local middleman for Jev (TypeSafe System One) at http://127.0.0.1:4777, with a live view of every call at http://127.0.0.1:4777/
+An unofficial local visualizer for Jev (TypeSafe System One) at http://127.0.0.1:4777, with a live view of every call at http://127.0.0.1:4777/
 It is a gateway, not a model: it sits between a Jev client and TypeSafe and answers nothing itself. Each request it
 receives goes on to Jev with the Jev key set in the viewer, Jev's answer goes back to the caller, and the call is kept
 whole (what was asked, what Jev saw, what it answered) in a SQLite database on this machine. Nothing is stored anywhere

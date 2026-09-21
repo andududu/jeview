@@ -1,4 +1,4 @@
-// Jeview: a local middleman for Jev with a live view of every call (README.md). A client sends its Jev requests
+// Jeview: a local visualizer for Jev, with a live view of every call (README.md). A client sends its Jev requests
 // here exactly as it would to TypeSafe (POST /v1/systemone, or /<label>/v1/systemone to group requests); the proxy
 // calls Jev with the key set in the viewer (without a key, calls are refused), answers the client with
 // Jev's answer, and keeps each call whole in a private SQLite database. Loopback only: calls can hold private data.
@@ -201,7 +201,7 @@ function keyChange(req: IncomingMessage, body: Buffer): string | null {
 export function llmsText(origin: string, keyed: boolean): string {
   return `# Jeview
 
-A local middleman for Jev (TypeSafe System One) at ${origin}, with a live view of every call at ${origin}/
+An unofficial local visualizer for Jev (TypeSafe System One) at ${origin}, with a live view of every call at ${origin}/
 It is a gateway, not a model: it sits between a Jev client and TypeSafe and answers nothing itself. Each request it
 receives goes on to Jev with the Jev key set in the viewer, Jev's answer goes back to the caller, and the call is kept
 whole (what was asked, what Jev saw, what it answered) in a SQLite database on this machine. Nothing is stored anywhere
