@@ -7,7 +7,7 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "start": "node jeview.ts",
-    "demo": "node scripts/demo.ts",
+    "demo": "node demo/pixel-knight.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

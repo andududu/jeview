@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel Knight</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23ff5c00'/%3E%3C/svg%3E">
+<style>
+  :root { --bg: #111111; --panel: #171717; --ink: #ededeb; --muted: #b4b4b0; --dull: #8c8c88; --line: rgb(237 237 235 / 12%); --accent: #ff5c00; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink); font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px; }
+  .brand { display: flex; align-items: baseline; gap: 10px; font: 300 26px ui-serif, "New York", Georgia, serif; letter-spacing: -.02em; }
+  .brand .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); align-self: center; }
+  .brand small { font: 400 14px ui-sans-serif, system-ui, sans-serif; color: var(--muted); letter-spacing: 0; }
+  .brand em { font-family: ui-serif, "New York", Georgia, serif; color: var(--accent); }
+  header a { color: var(--muted); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 13px; white-space: nowrap; }
+  header a:hover { color: var(--ink); border-color: rgb(237 237 235 / 30%); }
+  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 18px; padding: 0 24px 18px; align-items: start; }
+  .screen { position: relative; border-radius: 14px; overflow: hidden; background: #0b0d1a; width: min(100%, calc((100vh - 120px) * 16 / 9)); justify-self: center; } /* the whole screen in the window */
+  canvas { display: block; width: 100%; aspect-ratio: 16 / 9; image-rendering: pixelated; }
+  .hud { position: absolute; left: 14px; right: 14px; top: 10px; display: flex; gap: 18px; align-items: center; font: 700 clamp(11px, 1.3vw, 15px) ui-monospace, Menlo, monospace; color: #fff; text-shadow: 0 2px 0 #000; pointer-events: none; }
+  .hud .hearts { color: #ff4d6d; letter-spacing: 2px; }
+  .hud .grow { flex: 1; }
+  .banner { position: absolute; inset: 0; display: grid; place-content: center; gap: 6px; text-align: center; pointer-events: none; opacity: 0; transition: opacity .25s; }
+  .banner.on { opacity: 1; }
+  .banner b { font: 700 clamp(22px, 4.5vw, 52px)/1 ui-monospace, Menlo, monospace; letter-spacing: .05em; color: #fff; text-shadow: 0 4px 0 #000; }
+  .banner span { font: 600 clamp(11px, 1.3vw, 15px) ui-monospace, Menlo, monospace; color: #ffd23f; text-shadow: 0 2px 0 #000; }
+  aside { display: flex; flex-direction: column; gap: 14px; }
+  .card { background: var(--panel); border-radius: 14px; padding: 14px 16px 16px; }
+  .label { margin: 0 0 10px; font-size: 12px; color: var(--muted); }
+  /* the controller Jev presses */
+  .pad { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; }
+  .dpad { display: grid; grid-template-columns: repeat(3, 30px); grid-template-rows: repeat(3, 30px); }
+  .dpad span, .dpad button { background: #2a2a2a; }
+  .dpad .up { grid-area: 1 / 2; border-radius: 6px 6px 0 0; } .dpad .down { grid-area: 3 / 2; border-radius: 0 0 6px 6px; } .dpad .mid { grid-area: 2 / 2; }
+  .dpad .left { grid-area: 2 / 1; border-radius: 6px 0 0 6px; } .dpad .right { grid-area: 2 / 3; border-radius: 0 6px 6px 0; }
+  .pad button { border: 0; color: var(--muted); font: 700 12px ui-monospace, Menlo, monospace; cursor: default; transition: background .15s, color .15s, box-shadow .15s, transform .15s; }
+  .wait { justify-self: center; border-radius: 999px !important; background: #2a2a2a; padding: 5px 12px; font-size: 10.5px !important; letter-spacing: .08em; }
+  .face { display: grid; grid-template-columns: 38px 38px; gap: 8px; }
+  .face button { width: 38px; height: 38px; border-radius: 50%; font-size: 14px; }
+  .face .x { background: #24406f; color: #9bbcf5; margin-top: 16px; } .face .a { background: #22573a; color: #8fe0ad; }
+  .pad button.on { background: var(--accent) !important; color: #fff !important; box-shadow: 0 0 0 4px rgb(255 92 0 / 25%), 0 0 22px rgb(255 92 0 / 55%); transform: scale(1.08); }
+  .pad button.maybe { box-shadow: 0 0 0 2px rgb(255 92 0 / 60%); color: #fff; }
+  .legend { margin: 10px 0 0; font-size: 12px; color: var(--dull); }
+  .said { margin: 0; font-size: 15px; } .said b { color: var(--accent); font-weight: 700; }
+  .thoughts { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; color: var(--muted); } .thoughts li { padding: 2px 0; }
+  .log { list-style: none; margin: 0; padding: 0; font-size: 12.5px; color: var(--dull); } .log li { padding: 5px 0; border-top: 1px solid var(--line); } .log li:first-child { border-top: 0; color: var(--ink); padding-top: 0; }
+  .log small { color: var(--dull); margin-right: 6px; font-variant-numeric: tabular-nums; }
+  footer { padding: 0 24px 16px; color: var(--dull); font-size: 12.5px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot"></span>Pixel Knight <small>played by <em>Jev</em></small></div>
+  <a id="jeview" href="http://127.0.0.1:4777/" target="_blank" rel="noopener">Watch Jev think in Jeview ↗</a>
+</header>
+<main>
+  <div class="screen">
+    <canvas id="game" width="320" height="180"></canvas>
+    <div class="hud" id="hud"></div>
+    <div class="banner" id="banner"><b></b><span></span></div>
+  </div>
+  <aside>
+    <div class="card">
+      <p class="label">Jev's controller</p>
+      <div class="pad">
+        <div class="dpad"><span class="up"></span><button class="left" data-b="left">◀</button><span class="mid"></span><button class="right" data-b="right">▶</button><span class="down"></span></div>
+        <button class="wait" data-b="wait">WAIT</button>
+        <div class="face"><button class="x" data-b="press_x">X</button><button class="a" data-b="jump">A</button></div>
+      </div>
+      <p class="legend">A jumps · X swings the sword</p>
+    </div>
+    <div class="card">
+      <p class="label">What Jev decided</p>
+      <p class="said" id="said">Jev is looking at the level…</p>
+      <ul class="thoughts" id="thoughts"></ul>
+    </div>
+    <div class="card">
+      <p class="label">What happened</p>
+      <ul class="log" id="log"></ul>
+    </div>
+  </aside>
+</main>
+<footer>Every move is Jev's, made through Jeview. Nothing is scripted.</footer>
+<script src="/game.js"></script>
+</body>
+</html>

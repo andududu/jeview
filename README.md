@@ -16,8 +16,9 @@ npm start
 
 Open http://127.0.0.1:4777/ and add your TypeSafe API key in settings (the sliders icon, top right).
 
-To see it working, run `npm run demo` in a second terminal: Jev plays Pixel Knight, a made-up side-scroller, choosing
-every move through Jeview (about ten cents an hour). Ctrl-C stops it.
+To see it working, run `npm run demo` in a second terminal and open http://127.0.0.1:4781/: Jev plays Pixel Knight,
+a tiny side-scroller, deciding every move through Jeview while the viewer shows it thinking (about ten cents an hour
+while the game is open). Ctrl-C stops it.
 
 ## Send requests to it
 
