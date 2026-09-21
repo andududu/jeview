@@ -878,11 +878,13 @@
     cornerKey = key;
     const scroll = corner.querySelector(".corner-body")?.scrollTop ?? 0; // redraws while calls stream in keep the reader's place
     const tab = (name, words, count) => h("button", { class: "tab", "aria-pressed": String(data.tab === name), onclick: () => { data.tab = name; if (name === "recent") data.focus = null; renderCorner(true); } }, words, h("span", { class: "count", id: `n-${name}` }, count));
-    const chip = (value, name) => h("button", { class: "chip", "aria-pressed": String(data.run === value), onclick: () => { data.run = value; rebuild(); closeDrawer(); renderCorner(true); } }, name);
+    // the run picker: every label seen, as a dropdown above the totals for the run it picks
+    const ALL = "\u0000all";
+    const picker = labels.length > 1 ? h("select", { class: "run", "aria-label": "Run", onchange: (event) => { data.run = event.target.value === ALL ? null : event.target.value; rebuild(); closeDrawer(); renderCorner(true); } },
+      h("option", { value: ALL, selected: data.run === null }, "All runs"), labels.map((l) => h("option", { value: l, selected: data.run === l }, l || "No label"))) : null;
     corner.replaceChildren(h("div", { class: "corner-inner" },
       h("div", { class: "tabs" }, tab("recent", "Recent", shown.length.toLocaleString()), tab("questions", "Questions", [...world.kinds.values()].filter((k) => k.count && !k.special).length)),
-      h("p", { class: "stats-meta", id: "totals" }, totals(shown)),
-      labels.length > 1 ? h("div", { class: "chips" }, chip(null, "All runs"), labels.map((l) => chip(l, l || "No label"))) : null,
+      picker, h("p", { class: "stats-meta corner-totals", id: "totals" }, totals(shown)),
       h("div", { class: "corner-body" }, data.tab === "recent"
         ? (shown.length ? h("ol", { class: "list recent" }, shown.slice(-RECENT).reverse().map(recentRow)) : h("p", { class: "quiet" }, "Calls pile up here as they come in."))
         : data.focus ? questionStats(data.focus) : questionList())));
