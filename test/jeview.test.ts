@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { createJeview, DATABASE, JEV_USD_PER_INPUT_TOKEN, llmsText, summarize, type JeviewSummary } from "../src/jeview.ts";
+import { createJeview, DATABASE, JEV_USD_PER_INPUT_TOKEN, llmsText, requestDisplay, summarize, type JeviewSummary } from "../src/jeview.ts";
 
 type Seen = { method: string; url: string; headers: IncomingMessage["headers"]; body: string };
 type Hooks = { after(fn: () => unknown): void };
@@ -108,6 +108,18 @@ test("a Jeview-Trigger header names the answer a request follows from: recorded 
   await ask(first.events.kind, "/june/v1/systemone");
   const labelled = (await records(base)).records.at(-1)!;
   assert.deepEqual([labelled.label, labelled.trigger], ["june", "1:kind"]);
+});
+
+test("a Jeview-Display header says which part of an option to show: kept with the call, never sent on, and never a reason to refuse one", async (t) => {
+  const upstream = await jev(t, () => ({ body: jevAnswer }));
+  const { base } = await proxy(t, upstream.url);
+  const ask = (display?: string) => fetch(`${base}/v1/systemone`, { method: "POST", headers: display === undefined ? {} : { "Jeview-Display": display }, body: jevBody });
+  for (const display of [undefined, "name", "kind=name, is_urgent=meta.title", " kind = label ,name ", "no spaces allowed in a field", "=name", "x".repeat(501), "kind=na me, name"]) assert.equal((await ask(display)).status, 200);
+  assert.deepEqual((await records(base)).records.map((r) => r.display ?? null), [null, { "*": "name" }, { kind: "name", is_urgent: "meta.title" }, { kind: "label", "*": "name" }, null, null, null, { "*": "name" }]);
+  // Jev never hears of it, and the body is the caller's
+  assert.deepEqual(upstream.seen.flatMap((seen) => Object.keys(seen.headers).filter((name) => name.startsWith("jeview-"))), []);
+  assert.deepEqual([...new Set(upstream.seen.map((seen) => seen.body))], [jevBody]);
+  assert.deepEqual([requestDisplay(null), requestDisplay(""), requestDisplay("a.b-c_d"), requestDisplay("a..b"), requestDisplay("q=a=b")], [null, null, { "*": "a.b-c_d" }, null, { q: "a" }]);
 });
 
 test("without a key a Jev request is refused and recorded; Jev's own refusals reach the caller as sent; nothing else is accepted", async (t) => {

@@ -41,7 +41,7 @@ const OPTIONS_LISTED = 60;
 /** One recorded Jev call, as listed. `key` is the sha256 of the exact body sent to Jev: the same request always has
  * the same key, so a client that caches Jev answers by that hash can find the call here. */
 export type JeviewSummary = {
-  id: number; at: string; label: string; trigger: string | null;
+  id: number; at: string; label: string; trigger: string | null; display?: Record<string, string>;
   key: string; stateKey: string | null; status: number; elapsedMs: number; bytes: number;
   model: string | null; answeredBy: string | null; inputTokens: number | null; cost: number | null; questions: AnswerSummary[]; error?: string;
 };
@@ -63,13 +63,29 @@ export function requestTrigger(value: string | null): string | null {
   return value.trim();
 }
 
+/** Which part of an option's criteria the viewer shows for it, from a Jeview-Display header: one field for every question
+ * ("name"), or a field per question ("category=name, kind=title"); a field may be a path ("meta.title"). "*" holds the
+ * field for every question. Without the header an option is shown by its key. The header is only for show, so one that
+ * cannot be read is dropped: it is never a reason to refuse a call. */
+const DISPLAY_FIELD = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/;
+export function requestDisplay(value: string | null): Record<string, string> | null {
+  if (!value || value.length > 500) return null;
+  const display: Record<string, string> = {};
+  for (const part of value.split(",")) {
+    const [left = "", right] = part.split("=").map((word) => word.trim());
+    if (right === undefined) { if (DISPLAY_FIELD.test(left)) display["*"] = left; }
+    else if (left && left.length <= 100 && DISPLAY_FIELD.test(right)) display[left] = right;
+  }
+  return Object.keys(display).length ? display : null;
+}
+
 /** The question's own sentence: its instructions, or their `question` field when they carry context beside it. */
 export function asks(instructions: unknown): string {
   const text = typeof instructions === "string" ? instructions : object(instructions) && typeof instructions.question === "string" ? instructions.question : JSON.stringify(instructions) ?? "";
   return text.length > 300 ? text.slice(0, 297) + "..." : text;
 }
 
-export function summarize(call: { id: number; at: string; label: string; trigger: string | null; status: number; elapsedMs: number; error?: string }, body: Buffer, request: unknown, response: unknown): JeviewSummary {
+export function summarize(call: { id: number; at: string; label: string; trigger: string | null; display?: Record<string, string>; status: number; elapsedMs: number; error?: string }, body: Buffer, request: unknown, response: unknown): JeviewSummary {
   const questions = object(request) && object(request.questions) ? request.questions : {};
   const answers = object(response) && object(response.answers) ? response.answers : {};
   const usage = object(response) && object(response.usage) ? response.usage : {};
@@ -224,6 +240,13 @@ When a later request follows from one of those answers, send its event id in a h
 The viewer then grows that request's questions as a branch off the answer that triggered them. Jeview drops its own
 headers before calling Jev, and sends the body on exactly as it came.
 
+## Show an option by its name, not its key
+
+The viewer labels each answer with the option's key, such as "c14". When the criteria behind the keys are objects, a
+header says which part to show instead: Jeview-Display: name, or a field per question: Jeview-Display: category=name,
+kind=title. A field may be a path, such as meta.title. An option without that field keeps its key, and a header that
+cannot be read is ignored: it never stops a call.
+
 ## When a call is refused
 
 Whatever Jev answers, a refusal included, comes back as Jev sent it. Jeview's own refusals are JSON, { "error": "..." }:
@@ -269,11 +292,12 @@ export function createJeview(options: JeviewOptions): Jeview {
     const triggerHeader = req.headers[`${OWN_HEADER}trigger`];
     let trigger: string | null;
     try { trigger = requestTrigger(triggerHeader === undefined ? null : String(triggerHeader)); } catch (error) { return send(res, 400, { error: `jeview: ${(error as Error).message}` }); }
+    const displayHeader = req.headers[`${OWN_HEADER}display`], display = requestDisplay(displayHeader === undefined ? null : String(displayHeader));
     const sent = body, requestValue = parse(body.toString("utf8")); // sent on as it came
     const id = store.allocate(), at = new Date().toISOString(), started = Date.now();
     const keep = (status: number, text: string, error?: string) => {
       const responseValue = text ? parse(text) : null;
-      store.save({ summary: summarize({ id, at, label, trigger, status, elapsedMs: Date.now() - started, ...(error ? { error } : {}) }, sent, requestValue, responseValue), request: requestValue, response: responseValue });
+      store.save({ summary: summarize({ id, at, label, trigger, ...(display ? { display } : {}), status, elapsedMs: Date.now() - started, ...(error ? { error } : {}) }, sent, requestValue, responseValue), request: requestValue, response: responseValue });
     };
     const fail = (status: number, message: string) => { keep(status, "", message); return send(res, status, { error: message }); };
     const key = jevKey();

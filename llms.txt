@@ -21,6 +21,13 @@ When a later request follows from one of those answers, send its event id in a h
 The viewer then grows that request's questions as a branch off the answer that triggered them. Jeview drops its own
 headers before calling Jev, and sends the body on exactly as it came.
 
+## Show an option by its name, not its key
+
+The viewer labels each answer with the option's key, such as "c14". When the criteria behind the keys are objects, a
+header says which part to show instead: Jeview-Display: name, or a field per question: Jeview-Display: category=name,
+kind=title. A field may be a path, such as meta.title. An option without that field keeps its key, and a header that
+cannot be read is ignored: it never stops a call.
+
 ## When a call is refused
 
 Whatever Jev answers, a refusal included, comes back as Jev sent it. Jeview's own refusals are JSON, { "error": "..." }:
