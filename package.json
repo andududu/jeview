@@ -13,7 +13,8 @@
     "demo:support": "node demo/support-desk.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check:pages": "node --check ui/app.js && node --check demo/game.js && node --check demo/support-desk.js"
+    "check:pages": "node --check ui/app.js && node --check demo/game.js && node --check demo/support-desk.js",
+    "llms": "node --input-type=module -e \"import { writeFileSync } from 'node:fs'; import { llmsText } from './src/jeview.ts'; writeFileSync('llms.txt', llmsText('http://127.0.0.1:4777', false));\""
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

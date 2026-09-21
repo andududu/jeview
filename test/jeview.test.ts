@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { createJeview, DATABASE, JEV_USD_PER_INPUT_TOKEN, summarize, type JeviewSummary } from "../src/jeview.ts";
+import { createJeview, DATABASE, JEV_USD_PER_INPUT_TOKEN, llmsText, summarize, type JeviewSummary } from "../src/jeview.ts";
 
 type Seen = { method: string; url: string; headers: IncomingMessage["headers"]; body: string };
 type Hooks = { after(fn: () => unknown): void };
@@ -252,6 +252,11 @@ test("two Jeviews sharing a folder never hand out the same call id, and each sho
   const request = JSON.parse(jevBody) as unknown, response = JSON.parse(jevAnswer) as unknown;
   one.store.save({ summary: summarize({ id: 20, at: new Date().toISOString(), label: "", trigger: null, status: 200, elapsedMs: 1 }, Buffer.from(jevBody), request, response), request, response });
   assert.deepEqual([two.store.allocate(), three.store.allocate()], [21, 22]);
+});
+
+test("the llms.txt in the repository is the one a Jeview at the default address serves", () => {
+  // after changing llmsText, write it out again: see AGENTS.md
+  assert.equal(readFileSync(new URL("../llms.txt", import.meta.url), "utf8"), llmsText("http://127.0.0.1:4777", false));
 });
 
 test("the Jev key is set from the viewer only, never shown, and used by every call; llms.txt says how to connect", async (t) => {

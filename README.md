@@ -1,5 +1,7 @@
 # Jeview
 
+> Agents: [llms.txt](llms.txt) says how to use a running Jeview, and [AGENTS.md](AGENTS.md) how to work on this repository.
+
 An unofficial local middleman for Jev ([TypeSafe](https://typesafe.ai) System One), with a live view of every call.
 Jeview is an independent project: it is not made or endorsed by TypeSafe.
 
@@ -45,7 +47,8 @@ requests and the same answers, with no key needed from the caller.
   those answers, send its event id in a `Jeview-Trigger` header, and the map grows that request off the answer.
   Jeview drops its own headers before calling Jev and sends the body on unchanged.
 
-Agents can read `http://127.0.0.1:4777/llms.txt`.
+Agents can read `http://127.0.0.1:4777/llms.txt`: a running Jeview serves it with its own address and whether a key is
+set. [llms.txt](llms.txt) here is the same text, for the default address.
 
 ## Options
 
