@@ -795,6 +795,26 @@
     else { data.tab = "recent"; data.focus = null; renderCorner(true); }
   });
 
+  // ---------- the run picker, beside the title: every label seen ----------
+  const runName = (label) => label === null ? "All runs" : label || "No label";
+  function showRuns(labels) {
+    $("#runs").hidden = labels.length < 2;
+    $("#run-name").textContent = runName(data.run);
+    if (!$("#run-menu").hidden) fillRuns(); // open: keep it current
+  }
+  function fillRuns() {
+    const counts = new Map();
+    for (const r of data.records) counts.set(r.label, (counts.get(r.label) ?? 0) + 1);
+    const item = (label, count) => h("button", { class: "run-item", role: "option", "aria-selected": String(data.run === label), onclick: () => pickRun(label) },
+      h("span", { class: "run-check" }, data.run === label ? "✓" : ""), h("span", { class: "run-label" }, runName(label)), h("span", { class: "run-count" }, count.toLocaleString()));
+    $("#run-menu").replaceChildren(item(null, data.records.length), ...[...counts].map(([label, count]) => item(label, count)));
+  }
+  function pickRun(label) { data.run = label; openRuns(false); rebuild(); closeDrawer(); renderCorner(true); }
+  function openRuns(open) { $("#run-menu").hidden = !open; $("#run-button").setAttribute("aria-expanded", String(open)); if (open) fillRuns(); }
+  $("#run-button").addEventListener("click", () => openRuns($("#run-menu").hidden));
+  addEventListener("pointerdown", (event) => { if (!$("#runs").contains(event.target)) openRuns(false); });
+  addEventListener("keydown", (event) => { if (event.key === "Escape") openRuns(false); });
+
   // ---------- the corner: recent calls, and one question at a time ----------
   const corner = $("#corner");
   function focus(key) { data.focus = key; if (key) data.tab = "questions"; renderCorner(true); }
@@ -878,13 +898,10 @@
     cornerKey = key;
     const scroll = corner.querySelector(".corner-body")?.scrollTop ?? 0; // redraws while calls stream in keep the reader's place
     const tab = (name, words, count) => h("button", { class: "tab", "aria-pressed": String(data.tab === name), onclick: () => { data.tab = name; if (name === "recent") data.focus = null; renderCorner(true); } }, words, h("span", { class: "count", id: `n-${name}` }, count));
-    // the run picker: every label seen, as a dropdown above the totals for the run it picks
-    const ALL = "\u0000all";
-    const picker = labels.length > 1 ? h("select", { class: "run", "aria-label": "Run", onchange: (event) => { data.run = event.target.value === ALL ? null : event.target.value; rebuild(); closeDrawer(); renderCorner(true); } },
-      h("option", { value: ALL, selected: data.run === null }, "All runs"), labels.map((l) => h("option", { value: l, selected: data.run === l }, l || "No label"))) : null;
+    showRuns(labels);
     corner.replaceChildren(h("div", { class: "corner-inner" },
       h("div", { class: "tabs" }, tab("recent", "Recent", shown.length.toLocaleString()), tab("questions", "Questions", [...world.kinds.values()].filter((k) => k.count && !k.special).length)),
-      picker, h("p", { class: "stats-meta corner-totals", id: "totals" }, totals(shown)),
+      h("p", { class: "stats-meta corner-totals", id: "totals" }, totals(shown)),
       h("div", { class: "corner-body" }, data.tab === "recent"
         ? (shown.length ? h("ol", { class: "list recent" }, shown.slice(-RECENT).reverse().map(recentRow)) : h("p", { class: "quiet" }, "Calls pile up here as they come in."))
         : data.focus ? questionStats(data.focus) : questionList())));
