@@ -6,6 +6,7 @@
 // drawer, with the answer that triggered it and the calls it led to.
 "use strict";
 (() => {
+  const WINDOW = 20000; // how many calls the page opens on: the latest. Search and links reach the older ones
   const INVALID = "\u0000invalid", POLL_MS = 1000, TAU = Math.PI * 2, FADE_AFTER = 2000, GONE_AFTER = 10000, LAYER_LINGER = 5000, HOLD_GONE = 6000, RECENT = 80;
   const $ = (selector) => document.querySelector(selector);
   const SVG = "http://www.w3.org/2000/svg";
@@ -64,13 +65,20 @@
   // per-viewer toggles, remembered in this browser when it lets us
   const remembered = (name, fallback) => { try { const value = localStorage.getItem(`jeview.${name}`); return value === null ? fallback : value === "1"; } catch { return fallback; } };
   const remember = (name, on) => { try { localStorage.setItem(`jeview.${name}`, on ? "1" : "0"); } catch { /* not remembered, still applied */ } };
-  const data = { records: [], byId: new Map(), cursor: 0, meta: null, run: null, full: new Map(), selected: null, focus: null, tab: "recent", clock: 0, traces: remembered("traces", true), colours: remembered("colours", true), dedupe: remembered("dedupe", false) };
+  const data = { records: [], byId: new Map(), cursor: 0, older: 0, meta: null, run: null, full: new Map(), selected: null, focus: null, tab: "recent", clock: 0, traces: remembered("traces", true), colours: remembered("colours", true), dedupe: remembered("dedupe", true) };
   const visible = (record) => data.run === null || record.label === data.run;
   const eventOf = (record, q) => `${record.id}:${q.id}`;
   /** The call and question an event id names, when that call is here. */
   function eventCall(event) {
     const call = event ? data.byId.get(Number(String(event).split(":")[0])) : undefined;
     return call ? { call, q: call.questions.find((q) => eventOf(call, q) === event) } : null;
+  }
+  /** Calls older than the ones the page opened on are fetched when something names them: a search, a link, a trigger.
+   * They can be opened and listed, and stay off the map. */
+  async function known(ids) {
+    const missing = data.older ? ids.filter((id) => !data.byId.has(id)).slice(0, 1000) : []; // with nothing older, what is not here does not exist
+    if (!missing.length) return;
+    try { for (const record of (await (await fetch(`/_/api/records?ids=${missing.join(",")}`)).json()).records) if (!data.byId.has(record.id)) data.byId.set(record.id, record); } catch { /* listed without them */ }
   }
   async function fullRecord(id) {
     if (!data.full.has(id)) { const response = await fetch(`/_/api/records/${id}`); if (!response.ok) throw Error(`Call ${id} could not be read`); data.full.set(id, await response.json()); }
@@ -545,7 +553,13 @@
     return lineage ? colors.families[lineage.family][lineage.shade % SHADES.length] : null;
   }
   const heat = (option, now) => option.hot === undefined ? 0 : clamp(1 - (now - option.hot) / COOL_MS, 0, 1);
+  /** One frame after another. A frame that fails must not be the last one: the canvas is put back as it was (resizing
+   * it clears whatever the failed frame left behind) and the next frame is drawn. */
   function draw(now) {
+    try { paint(now); } catch (error) { console.error(error); resize(); }
+    requestAnimationFrame(draw);
+  }
+  function paint(now) {
     measure();
     keepArranged(now);
     glide();
@@ -667,14 +681,14 @@
     ctx.globalAlpha = 1;
     // landings
     for (let i = pulses.length - 1; i >= 0; i--) {
-      const p = pulses[i], t = (now - p.start) / 900, [px, py] = p.at();
+      const p = pulses[i], t = Math.max(0, (now - p.start) / 900), [px, py] = p.at(); // a landing is stamped during the frame, and `now` is the frame's start: never a negative age, which would be a negative radius
       if (t >= 1) { pulses.splice(i, 1); continue; }
       ctx.strokeStyle = tone(p.tone); ctx.globalAlpha = (1 - t) * 0.8 * (hovered ? 0.3 : 1); ctx.lineWidth = 1.4;
       ctx.beginPath(); ctx.arc(px, py, p.r + ease(t) * 18, 0, TAU); ctx.stroke();
     }
     ctx.globalAlpha = 1;
     // Jev, above the calls flying in and out of it
-    const since = now - flash, breathe = (Math.sin(now / 900) + 1) / 2;
+    const since = Math.max(0, now - flash), breathe = (Math.sin(now / 900) + 1) / 2;
     const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, 34 + breathe * 6);
     halo.addColorStop(0, colors.glow); halo.addColorStop(1, "transparent");
     ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(cx, cy, 40 + breathe * 6, 0, TAU); ctx.fill();
@@ -685,7 +699,6 @@
     ctx.restore();
     if (hovered) card(hovered);
     if (!empty.hidden) { empty.style.left = `${view.x + world.jev.x * view.k}px`; empty.style.top = `${view.y + world.jev.y * view.k + 56}px`; } // under the Jev dot
-    requestAnimationFrame(draw);
   }
 
   /** The hovered question, whole, on a card above everything else: right beside its dot, on the side its line comes
@@ -881,7 +894,8 @@
   /** New calls pile onto the top of the recent list without redrawing the rows already there. */
   function pileUp(records) {
     const list = corner.querySelector(".recent");
-    if (data.tab !== "recent" || !list) return;
+    if (data.tab !== "recent") return;
+    if (!list) return renderCorner(true); // the first calls into an empty viewer: there is no list to pile onto yet
     for (const record of records.filter(visible)) list.prepend(recentRow(record));
     while (list.children.length > RECENT) list.lastChild.remove();
     const shown = data.records.filter(visible);
@@ -902,6 +916,7 @@
     corner.replaceChildren(h("div", { class: "corner-inner" },
       h("div", { class: "tabs" }, tab("recent", "Recent", shown.length.toLocaleString()), tab("questions", "Questions", [...world.kinds.values()].filter((k) => k.count && !k.special).length)),
       h("p", { class: "stats-meta corner-totals", id: "totals" }, totals(shown)),
+      data.older ? h("p", { class: "stats-meta corner-totals" }, `The latest calls. Search reaches the ${data.older.toLocaleString()} before them.`) : null,
       h("div", { class: "corner-body" }, data.tab === "recent"
         ? (shown.length ? h("ol", { class: "list recent" }, shown.slice(-RECENT).reverse().map(recentRow)) : h("p", { class: "quiet" }, "Calls pile up here as they come in."))
         : data.focus ? questionStats(data.focus) : questionList())));
@@ -925,7 +940,7 @@
   function closeDrawer() { trail.length = 0; here = null; $("#back").hidden = true; drawer.classList.remove("open"); drawer.inert = true; drawer.setAttribute("aria-hidden", "true"); data.selected = null; markSelected(); layout(); }
   function markSelected() { for (const li of corner.querySelectorAll(".recent li")) li.classList.toggle("here", Number(li.dataset.id) === data.selected?.id); }
   $("#close").addEventListener("click", closeDrawer);
-  addEventListener("keydown", (event) => { if (event.key === "Escape") { closeDrawer(); $("#search").hidden = true; for (const [b, p] of POPOVERS) { $(p).hidden = true; $(b).setAttribute("aria-expanded", "false"); } } if (event.key === "/" && document.activeElement?.tagName !== "INPUT") { event.preventDefault(); openSearch(); } });
+  addEventListener("keydown", (event) => { if (event.key === "Escape") { closeDrawer(); $("#search").hidden = true; closePopovers(); } if (event.key === "/" && document.activeElement?.tagName !== "INPUT") { event.preventDefault(); openSearch(); } });
 
   /** When a call was made: the time today, or the day and time before that. */
   function clock(at) {
@@ -1011,6 +1026,7 @@
     openDrawer(h("p", { class: "eyebrow" }, `Call ${id}`), h("h2", { class: "d-title" }, headline(record)), h("p", { class: "d-meta" }, "Loading…"));
     let full;
     try { full = await fullRecord(id); } catch (error) { body.append(h("div", { class: "notice" }, error.message)); return; }
+    if (record.trigger) await known([Number(String(record.trigger).split(":")[0])]); // the call that triggered it may be an older one
     if (data.selected?.id !== id) return;
     const questions = full.request?.questions || {}, answers = full.response?.answers || {};
     const panel = h("div", { class: "panel" }), toggles = [];
@@ -1062,18 +1078,20 @@
   function about() {
     const m = data.meta; if (!m) return;
     $("#run-line").textContent = `${location.origin}/v1/systemone`;
-    $("#about-facts").replaceChildren(h("span", {}, "Each call goes to Jev with the key in settings, and is saved whole in a database ", h("span", { class: "hint", "data-tip": m.database }, "on this computer"), "."));
+    $("#about-facts").replaceChildren(h("span", {}, "Each call is saved whole, what was asked and what Jev answered, in a database ", h("span", { class: "hint", "data-tip": m.database }, "on this computer"), "."));
     $("#nokey").hidden = !!m.keyed;
     $("#empty").hidden = data.records.length > 0;
   }
-  // one popover at a time: how to use, or the settings
+  // one popover at a time: how to use, the Jev key, or the layout menu
   const POPOVERS = [["#about", "#about-panel"], ["#settings", "#settings-panel"], ["#layout", "#layout-panel"]];
+  function closePopovers() { for (const [b, p] of POPOVERS) { $(p).hidden = true; $(b).setAttribute("aria-expanded", "false"); } }
   function popover(button, panel) {
     const open = $(panel).hidden;
-    for (const [b, p] of POPOVERS) { $(p).hidden = true; $(b).setAttribute("aria-expanded", "false"); }
+    closePopovers();
     $(panel).hidden = !open; $(button).setAttribute("aria-expanded", String(open));
     if (open && panel === "#settings-panel") loadSettings();
   }
+  addEventListener("pointerdown", (event) => { if (!POPOVERS.some(([b, p]) => $(b).contains(event.target) || $(p).contains(event.target))) closePopovers(); }); // a press anywhere else closes them
   $("#about").addEventListener("click", () => popover("#about", "#about-panel"));
   // the layout menu opens under a mouse and closes a moment after it leaves; a tap or the keyboard toggles it
   let layoutClose = 0;
@@ -1087,11 +1105,13 @@
   $("#nokey").addEventListener("click", () => { if ($("#settings-panel").hidden) popover("#settings", "#settings-panel"); $("#key-input").focus(); });
 
   // ---------- settings: the Jev key ----------
+  /** A key that is set shows in the field itself, masked but for its ending; pasting another replaces it. */
   function showSettings(view) {
-    $("#key-state").textContent = view.jevKey.set ? `Jev calls use the key ending ${view.jevKey.ending}.` : "No key yet: Jev calls are refused until you add one.";
-    $("#nokey").hidden = view.jevKey.set;
-    $("#key-remove").hidden = !view.jevKey.set;
-    $("#key-input").placeholder = view.jevKey.set ? "Paste a new key to replace it" : "Paste a TypeSafe API key";
+    const { set, ending } = view.jevKey;
+    $("#key-state").hidden = set;
+    $("#nokey").hidden = set;
+    $("#key-input").placeholder = set ? `*******${ending}` : "Paste a TypeSafe API key";
+    $("#key-input").setAttribute("aria-label", set ? `TypeSafe API key, set, ending ${ending}` : "TypeSafe API key"); // a placeholder is not reliably read out
   }
   async function loadSettings() { try { showSettings(await (await fetch("/_/api/settings")).json()); } catch { /* the proxy is down; the pulse says so */ } }
   async function saveSettings(jevKey) {
@@ -1102,7 +1122,6 @@
     $("#key-input").value = ""; showSettings(value);
   }
   $("#key-form").addEventListener("submit", (event) => { event.preventDefault(); const key = $("#key-input").value.trim(); if (key) saveSettings(key); });
-  $("#key-remove").addEventListener("click", () => saveSettings(null));
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-copy]");
     if (button) navigator.clipboard.writeText($("#" + button.dataset.copy).textContent).then(() => { button.textContent = "Copied"; setTimeout(() => (button.textContent = "Copy"), 1200); });
@@ -1116,7 +1135,8 @@
       const q = $("#query").value.trim();
       if (!q) return closeDrawer();
       const ids = (await (await fetch(`/_/api/search?q=${encodeURIComponent(q)}`)).json()).ids;
-      if ($("#query").value.trim() === q) openList(`“${q}”`, `${plural(ids.length, "call")} mention it`, ids.filter((id) => visible(data.byId.get(id) ?? {})));
+      await known(ids);
+      if ($("#query").value.trim() === q) openList(`“${q}”`, `${plural(ids.length, "call")} mention${ids.length === 1 ? "s" : ""} it`, ids.filter((id) => visible(data.byId.get(id) ?? {})));
     }, 250);
   });
   document.addEventListener("pointerover", (event) => {
@@ -1128,16 +1148,24 @@
   document.addEventListener("pointerout", (event) => { if (event.target.closest?.("[data-tip]")) hideTip(); });
 
   // ---------- live ----------
+  let drawn = false, fresh = []; // calls read and not yet shown: kept across polls, so a page that failed loses none of the pages before it
   async function poll() {
     try {
-      const response = await fetch(`/_/api/records?since=${data.cursor}`);
-      if (!response.ok) throw Error(String(response.status));
-      const next = await response.json(), first = data.cursor === 0;
-      data.meta = next; data.cursor = next.cursor;
-      for (const record of next.records) { data.records.push(record); data.byId.set(record.id, record); }
-      if (first) { await document.fonts?.ready; readColors(); rebuild(); renderCorner(true); canvas.classList.add("ready"); const wanted = Number(location.hash.slice(1)); if (wanted && data.byId.has(wanted)) openCall(wanted); }
-      else if (next.records.length) { arrive(next.records); pileUp(next.records); renderCorner(); }
+      const first = !drawn; // once a page: an empty viewer's first call then flies in like any other
+      do { // a long history opens on its latest calls, and comes a page at a time
+        const response = await fetch(`/_/api/records?${data.meta === null ? `latest=${WINDOW}` : `since=${data.cursor}`}`);
+        if (!response.ok) throw Error(String(response.status));
+        const next = await response.json();
+        if (data.meta === null) data.older = next.older ?? 0;
+        data.meta = next; data.cursor = next.cursor;
+        for (const record of next.records) { data.records.push(record); data.byId.set(record.id, record); fresh.push(record); }
+      } while (data.meta.more);
+      if (first) { await document.fonts?.ready; readColors(); rebuild(); renderCorner(true); canvas.classList.add("ready"); drawn = true; const wanted = Number(location.hash.slice(1)); if (wanted) { await known([wanted]); if (data.byId.has(wanted)) openCall(wanted); } }
+      else if (fresh.length) { arrive(fresh); pileUp(fresh); renderCorner(); }
+      fresh = [];
       about();
+      // the first visit in this browser opens on what Jeview is and how to use it
+      if (first && !remembered("welcomed", false) && $("#about-panel").hidden && !drawer.classList.contains("open")) { remember("welcomed", true); popover("#about", "#about-panel"); } // not over a call a link opened: next time
       $("#pulse").className = "pulse on"; $("#pulse").dataset.tip = "Live";
     } catch { $("#pulse").className = "pulse"; $("#pulse").dataset.tip = "The proxy is not answering"; }
     setTimeout(poll, POLL_MS);

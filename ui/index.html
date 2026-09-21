@@ -24,34 +24,35 @@
     <button id="find" class="icon" aria-label="Search calls" data-tip="Search">
       <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M13 13l4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
     </button>
-    <button id="settings" class="icon" aria-label="Settings" aria-expanded="false" data-tip="Settings">
-      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M3 6h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="7" cy="6" r="2.2" fill="var(--paper)" stroke="currentColor" stroke-width="1.6"/><circle cx="13" cy="14" r="2.2" fill="var(--paper)" stroke="currentColor" stroke-width="1.6"/></svg>
+    <button id="settings" class="icon" aria-label="Jev key" aria-expanded="false" data-tip="Jev key">
+      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="6.5" cy="13.5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 11l7.5-7.5M13.5 6.5l2.5 2.5M11 9l2 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <button id="about" class="icon" aria-label="How to use" aria-expanded="false" data-tip="How to use">i</button>
   </div>
 </header>
 
 <div id="about-panel" class="popover" hidden>
+  <p class="eyebrow">What Jeview is</p>
+  <p class="quiet">A middleman between your code and Jev. Your requests come here instead of going to TypeSafe; Jeview sends each one on with your key, hands Jev's answer back, and keeps a copy to show you. It answers nothing itself.</p>
   <p class="eyebrow">Send Jev requests here</p>
   <p class="line"><code id="run-line">http://127.0.0.1:4777/v1/systemone</code><button class="ghost small" data-copy="run-line">Copy</button></p>
-  <p class="quiet">The same requests and answers as TypeSafe's address, with no key needed. To name a run, add a label: <code>/&lt;label&gt;/v1/systemone</code>.</p>
+  <p class="quiet">The same requests and answers as TypeSafe's address, with no key needed. To group requests under a project or label, add it to the path: <code>/&lt;label&gt;/v1/systemone</code>.</p>
   <p class="eyebrow">Link a call to the answer that led to it</p>
   <p class="quiet">Each answer comes back with an event id in <code>events</code>. Send it with a later call in a <code>Jeview-Trigger</code> header and the map grows that call off the answer. Jeview drops the header before calling Jev.</p>
   <p class="eyebrow">Where calls are kept</p>
   <p class="quiet" id="about-facts"></p>
+  <p class="quiet">Nothing is stored anywhere else. Jeview runs on your computer, has no accounts and no tracking, and sends your requests to TypeSafe only.</p>
   <p class="quiet">For agents and scripts: <a href="/llms.txt" target="_blank" rel="noopener">llms.txt</a> explains how to connect.</p>
 </div>
 
 <div id="settings-panel" class="popover" hidden>
   <p class="eyebrow">Jev key</p>
-  <p id="key-state"></p>
+  <p id="key-state" hidden>No key yet: Jev calls are refused until you add one.</p>
   <form id="key-form" class="key-form" autocomplete="off">
     <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste a TypeSafe API key" aria-label="TypeSafe API key">
     <button class="ghost small" type="submit">Use this key</button>
   </form>
   <p class="notice" id="key-error" hidden></p>
-  <button id="key-remove" class="ghost small" type="button" hidden>Remove the key</button>
-  <p class="quiet note">Every Jev call uses this key. It stays on this computer and is never shown again.</p>
 </div>
 
 <button id="nokey" class="nokey" hidden>Add your Jev key to start</button>
@@ -69,7 +70,7 @@
     <span class="words"><b>Traces</b><span class="note">A question a call triggered grows off the answer that led to it. Off, every question hangs straight off Jev.</span></span>
     <span class="switch" aria-hidden="true"></span>
   </button>
-  <button id="dedupe" class="switch-row" type="button" role="switch" aria-checked="false">
+  <button id="dedupe" class="switch-row" type="button" role="switch" aria-checked="true">
     <span class="words"><b>Deduplicate</b><span class="note">The same question after several answers to one question is a single node, joined to each of them.</span></span>
     <span class="switch" aria-hidden="true"></span>
   </button>
