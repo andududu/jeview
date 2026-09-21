@@ -309,6 +309,7 @@ const server = createServer((req, res) => {
   }
   res.writeHead(404).end();
 });
+server.on("error", (error: NodeJS.ErrnoException) => { console.error(error.code === "EADDRINUSE" ? `Port ${port} is already in use. If Pixel Knight is already running, open http://127.0.0.1:${port}/; otherwise start this one on another port: --port ${port + 1}` : `Pixel Knight could not start: ${error.message}`); process.exit(1); });
 server.listen(port, "127.0.0.1", () => console.log(`Pixel Knight: open http://127.0.0.1:${port}/ to watch Jev play (through ${url}). Ctrl-C stops it.`));
 process.on("SIGINT", () => process.exit(0));
 process.on("SIGTERM", () => process.exit(0));
