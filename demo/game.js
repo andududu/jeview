@@ -1,9 +1,9 @@
 // Pixel Knight's screen: draws each turn the game server sends while Jev plays, and lights up the button Jev pressed.
-const W = 320, H = 180, T = 16, GROUND = 146, MOVE = 460;
+const W = 320, H = 180, T = 16, GROUND = 146, STEP = 240, TILE = 105, JUMP = 320; // ms: a step, each tile of a run, a jump
 const canvas = document.getElementById("game"), ctx = canvas.getContext("2d");
 const $ = (id) => document.getElementById(id);
 
-const game = { scene: null, x: 1, hud: null, anim: null, queue: [], cam: 0, particles: [], floaters: [], waiting: null, run: "" };
+const game = { scene: null, x: 1, hud: null, anim: null, queue: [], cam: 0, particles: [], floaters: [], waiting: null, told: 0 };
 
 // ---------- pixel art ----------
 const C = {
@@ -144,16 +144,19 @@ function burst(x, y, colors, count = 14) {
 function floater(text, x, y, color) { game.floaters.push({ text, x, y, color, born: performance.now() }); }
 
 // ---------- a turn, drawn ----------
-const NAMES = { right: "RIGHT", left: "LEFT", jump: "JUMP", press_x: "X", wait: "WAIT" };
+const NAMES = { run: "RUN", right: "RIGHT", left: "LEFT", jump: "JUMP", press_x: "X", wait: "WAIT" };
+const PAD = { run: "right", right: "right", left: "left", jump: "jump", press_x: "press_x", wait: "wait" }; // run holds the right button
 const pct = (p) => (typeof p === "number" ? `${Math.round(p * 100)}%` : "–");
 const words = (s) => String(s ?? "").replace(/_/g, " ");
 
 function begin(message) {
   const before = game.scene;
-  game.anim = {
-    message, start: performance.now(), done: false, effects: false,
+  fetch(`/shown?turn=${message.turn}`, { method: "POST" }).catch(() => {}); // the game works out the next turn meanwhile
+  const move = message.button === "run" ? Math.max(STEP, Math.abs(message.to - message.from) * TILE) : message.button === "jump" ? JUMP : STEP;
+  game.anim = { move,
+    message, start: performance.now(), done: false, effects: false, speed: 1 + Math.min(2, game.queue.length * 0.7), // quicker when turns queue up
     before: new Map((before?.mobs ?? []).map((m) => [m.id, m])), coins: new Set(before?.coins ?? []), highCoins: new Set(before?.highCoins ?? []),
-    end: MOVE + (message.fell ? 520 : message.hurt ? 420 : message.x !== message.to ? 240 : 120),
+    end: move + (message.fell ? 420 : message.hurt ? 300 : message.x !== message.to ? 180 : 0),
   };
   game.waiting = null; banner(null);
   press(message);
@@ -161,21 +164,21 @@ function begin(message) {
 }
 function press({ button, said }) {
   for (const b of document.querySelectorAll(".pad button")) b.classList.remove("on", "maybe");
-  const final = document.querySelector(`.pad [data-b="${button}"]`);
+  const final = document.querySelector(`.pad [data-b="${PAD[button] ?? button}"]`);
   if (said.doubt !== null && said.chosen !== button) { // Jev reached for jump, then thought better of it
-    const first = document.querySelector(`.pad [data-b="${said.chosen}"]`);
+    const first = document.querySelector(`.pad [data-b="${PAD[said.chosen] ?? said.chosen}"]`);
     first?.classList.add("maybe");
     setTimeout(() => { first?.classList.remove("maybe"); final?.classList.add("on"); }, 220);
   } else final?.classList.add("on");
   setTimeout(() => final?.classList.remove("on"), 700);
 }
-function tell({ button, said }) {
+function tell({ turn, button, said }) {
+  game.told = turn;
   $("said").innerHTML = said.doubt !== null && said.chosen !== button
     ? `Jev reached for <b>${NAMES[said.chosen]}</b>, doubted it (${pct(said.doubt)} safe), and pressed <b>${NAMES[button]}</b>`
     : `Jev pressed <b>${NAMES[button]}</b> · ${pct(said.sure)} sure`;
   const thoughts = [];
   if (said.danger !== null && said.danger >= 0.5) thoughts.push(`Senses danger (${pct(said.danger)})`);
-  if (said.sees) thoughts.push(`Sees ${words(said.sees)}${said.plan ? `, would ${words(said.plan)}` : ""}`);
   if (said.potion) thoughts.push("Drinks the potion on its last heart");
   $("thoughts").replaceChildren(...thoughts.map((t) => Object.assign(document.createElement("li"), { textContent: t })));
 }
@@ -198,14 +201,14 @@ function banner(title, sub = "") {
 
 /** Where the knight is, t ms into a turn. */
 function knightAt(a, t) {
-  const m = a.message, e = clamp(t / MOVE, 0, 1);
-  if (t <= MOVE) {
-    const x = lerp(m.from, m.to, m.button === "jump" ? e : ease(e));
+  const m = a.message, e = clamp(t / a.move, 0, 1);
+  if (t <= a.move) {
+    const x = lerp(m.from, m.to, e); // a steady pace, so steps and runs flow into each other
     const y = m.button === "jump" && m.to !== m.from ? -Math.sin(Math.PI * e) * 26 : 0;
     return { x, y, walking: m.button !== "jump" && m.to !== m.from };
   }
-  if (m.fell) { const f = clamp((t - MOVE) / 320, 0, 1); return f < 1 ? { x: m.to, y: f * f * 70 } : { x: m.x, y: 0, blink: true }; }
-  if (m.x !== m.to) { const f = clamp((t - MOVE) / 200, 0, 1); return { x: lerp(m.to, m.x, f), y: -Math.sin(Math.PI * f) * 7 }; }
+  if (m.fell) { const f = clamp((t - a.move) / 260, 0, 1); return f < 1 ? { x: m.to, y: f * f * 70 } : { x: m.x, y: 0, blink: true }; }
+  if (m.x !== m.to) { const f = clamp((t - a.move) / 160, 0, 1); return { x: lerp(m.to, m.x, f), y: -Math.sin(Math.PI * f) * 7 }; }
   return { x: m.to, y: 0, blink: m.hurt };
 }
 
@@ -215,6 +218,7 @@ function effects(a) { // the moment the move lands: what was defeated, collected
   for (const c of a.coins) if (!m.scene.coins.includes(c)) { burst(c * T + 8, GROUND - 10, ["#ffd23f", "#fff6c2"], 8); floater("+10", c * T + 4, GROUND - 22, "#ffd23f"); }
   for (const c of a.highCoins) if (!m.scene.highCoins.includes(c)) { burst(c * T + 8, GROUND - 40, ["#ffd23f", "#fff6c2"], 8); floater("+10", c * T + 4, GROUND - 52, "#ffd23f"); }
   if (m.hurt) { floater(m.fell ? "OOPS" : "OUCH", m.to * T, GROUND - 34, "#ff4d6d"); }
+  if (m.events.includes("squashed a slime")) { burst(m.to * T + 8, GROUND - 4, ["#46c46a", "#9cf0b0", "#ffffff"]); floater("SQUASH +20", m.to * T, GROUND - 30, "#9cf0b0"); }
   if (m.events.some((e) => e.startsWith("defeated"))) floater(m.events.find((e) => e.startsWith("defeated the Slime King")) ? "+200" : "+20", (m.from + 1) * T, GROUND - 30, "#9cf0b0");
   showHud(m.hud);
 }
@@ -234,7 +238,7 @@ function finish(a) {
 function frame(now) {
   requestAnimationFrame(frame);
   if (!game.anim && game.queue.length) {
-    while (game.queue.length > 2) { const skip = game.queue.shift(); game.scene = skip.next ?? skip.scene; game.x = skip.next ? 1 : skip.x; showHud(skip.hud); } // catching up after the tab slept
+    while (game.queue.length > 6) { const skip = game.queue.shift(); game.scene = skip.next ?? skip.scene; game.x = skip.next ? 1 : skip.x; showHud(skip.hud); } // catching up after the tab slept
     begin(game.queue.shift());
   }
   const a = game.anim;
@@ -242,9 +246,9 @@ function frame(now) {
   if (!game.scene) return;
   let scene = game.scene, k = { x: game.x, y: 0 }, t = 0;
   if (a && !a.hold) {
-    t = now - a.start; scene = a.message.scene;
+    t = (now - a.start) * a.speed; scene = a.message.scene;
     k = knightAt(a, t);
-    if (!a.effects && t >= MOVE) { a.effects = true; effects(a); }
+    if (!a.effects && t >= a.move) { a.effects = true; effects(a); }
     if (t >= a.end) { finish(a); }
   }
   const target = clamp(k.x * T - W * 0.35, 0, scene.floor.length * T - W);
@@ -252,8 +256,10 @@ function frame(now) {
 
   sky(now);
   tiles(scene, now);
-  const e = a && !a.hold ? ease(clamp(t / MOVE, 0, 1)) : 1;
-  const coins = a && !a.hold && t < MOVE ? a.coins : new Set(scene.coins), high = a && !a.hold && t < MOVE / 2 ? a.highCoins : new Set(scene.highCoins);
+  const e = a && !a.hold ? ease(clamp(t / a.move, 0, 1)) : 1;
+  const passed = a && !a.hold ? lerp(a.message.from, a.message.to, clamp(t / a.move, 0, 1)) : Infinity; // coins go as the knight reaches them
+  const coins = a && !a.hold ? new Set([...a.coins].filter((c) => !(c <= passed + 0.5 && !scene.coins.includes(c)))) : new Set(scene.coins);
+  const high = a && !a.hold && t < a.move / 2 ? a.highCoins : new Set(scene.highCoins);
   for (const c of coins) coin(c * T - game.cam, GROUND - 13, now, c);
   for (const c of high) coin(c * T - game.cam, GROUND - 42, now, c);
   for (const m of scene.mobs) {
@@ -261,8 +267,8 @@ function frame(now) {
     const x = before ? lerp(before.x, m.x, e) : m.x, low = before ? lerp(before.high ? 0 : 1, m.high ? 0 : 1, e) : m.high ? 0 : 1;
     mob(m, x, low, now);
   }
-  if (a && !a.hold && t < MOVE) for (const [id, old] of a.before) if (!scene.mobs.some((m) => m.id === id)) mob(old, old.x, old.high ? 0 : 1, now); // until the hit lands
-  const swing = a && !a.hold && a.message.button === "press_x" ? clamp(1 - t / 320, 0, 1) : 0;
+  if (a && !a.hold && t < a.move) for (const [id, old] of a.before) if (!scene.mobs.some((m) => m.id === id)) mob(old, old.x, old.high ? 0 : 1, now); // until the hit lands
+  const swing = a && !a.hold && a.message.button === "press_x" ? clamp(1 - t / 260, 0, 1) : 0;
   knight(k.x, k.y, now, !!k.walking, swing, k.blink && Math.floor(now / 70) % 2 === 0);
   if (!a && !game.waiting) thinking(game.x, now);
 
@@ -288,6 +294,11 @@ events.onmessage = (event) => {
   } else if (message.type === "waiting") {
     game.waiting = message.reason; banner("WAITING FOR JEV", message.reason); $("said").textContent = message.reason;
   } else if (message.type === "turn") game.queue.push(message);
+  else if (message.type === "thought" && message.turn === game.told) { // a side question answered after the move
+    const li = document.createElement("li");
+    li.textContent = `Sees ${words(message.sees)}${message.plan ? `, would ${words(message.plan)}` : ""}`;
+    $("thoughts").append(li);
+  }
 };
 events.onerror = () => { if (!game.anim) banner("PAUSED", "the game server is not running"); };
 events.onopen = () => { if (!game.waiting) banner(null); };
