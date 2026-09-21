@@ -1,6 +1,6 @@
 // Pixel Knight: a tiny side-scroller that Jev plays through Jeview, drawn live in the browser.
 //
-//   node demo/pixel-knight.ts [--port 4781] [--proxy http://127.0.0.1:4777] [--label pixel-knight] [--pace 0] [--fail 0.03]
+//   node demo/pixel-knight.ts [--port 4781] [--proxy http://127.0.0.1:4777] [--label pixel-knight] [--ahead 3] [--pace 0] [--fail 0.03]
 //
 // Open http://127.0.0.1:4781/ to watch. The game runs here: each turn Jev sees the tiles ahead of the knight (and what
 // each button would do) and picks a button; the game moves the knight, the slimes, bats and fireballs, and keeps score.
@@ -9,8 +9,9 @@
 // potion. The page draws each turn as it comes; open Jeview beside it to watch Jev think. It plays only while a page
 // is open. Every call goes to the real Jev through Jeview (one to four a turn, about ten cents an hour).
 //
-// Jev decides the next turn while the page is still drawing this one, staying one turn ahead. --pace adds a pause between
-// turns in milliseconds, and --fail says how often a turn also sends a call Jev rejects.
+// Jev decides the coming turns while the page is still drawing this one, up to --ahead turns ahead, so a slow answer
+// never shows. --pace adds a pause between turns in milliseconds, and --fail says how often a turn also sends a call Jev
+// rejects.
 import { readFileSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { parseArgs } from "node:util";
@@ -20,13 +21,14 @@ const { values } = parseArgs({
     port: { type: "string", default: "4781" },
     proxy: { type: "string", default: "http://127.0.0.1:4777" },
     label: { type: "string", default: "pixel-knight" },
+    ahead: { type: "string", default: "3" },
     pace: { type: "string", default: "0" },
     fail: { type: "string", default: "0.03" },
   },
 });
 const port = Number(values.port), proxy = values.proxy.replace(/\/+$/, "");
 const url = `${proxy}${values.label ? `/${encodeURIComponent(values.label)}` : ""}/v1/systemone`;
-const pace = Number(values.pace), failRate = Number(values.fail);
+const pace = Number(values.pace), failRate = Number(values.fail), ahead = Math.max(1, Number(values.ahead));
 
 // ---------- the questions Jev is asked ----------
 const RULES = "You play Pixel Knight, a side-scroller. Each turn the knight does one thing: step right, step left, jump (over the next tile, landing two tiles ahead), press X (swing the sword at the next tile), or wait. Reach the flag at the end of the level. Falling into a gap or stepping on spikes costs a heart, and so does touching a slime, a low bat or a fireball. Jumping onto a slime squashes it. Crates and the Slime King block the way: smash a crate with the sword, and hit the Slime King three times. Coins are worth 10 points. With no hearts left, the level starts again. Tips: pick the safe move that gets furthest right. Run when the way ahead is clear. Jump only over a gap, spikes or an enemy right in front, onto a slime to squash it, or for a coin in the air, and only with a safe landing. Swing the sword at a crate, a bat or the Slime King right next to the knight. Step back or wait only to let a fireball or a swooping bat pass.";
@@ -286,7 +288,7 @@ async function turn() {
 // ---------- the page ----------
 const watchers = new Set<ServerResponse>();
 const broadcast = (message: unknown) => { const line = `data: ${JSON.stringify(message)}\n\n`; for (const watcher of watchers) watcher.write(line); };
-// the latest turn a page has started to draw; the game stays at most one turn ahead of it
+// the latest turn a page has started to draw; the game stays at most `ahead` turns ahead of it
 let shown = 0, shownAt = 0;
 const FILES: Record<string, [string, string]> = { "/": ["index.html", "text/html; charset=utf-8"], "/game.js": ["game.js", "text/javascript; charset=utf-8"] };
 const server = createServer((req, res) => {
@@ -300,7 +302,7 @@ const server = createServer((req, res) => {
   }
   if (path === "/events") {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
-    res.write(`data: ${JSON.stringify({ type: "hello", scene: scene(), x: game.x, hud: hud(), jeview: `${proxy}/` })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "hello", scene: scene(), x: game.x, hud: hud(), jeview: `${proxy}/`, ahead })}\n\n`);
     watchers.add(res); shown = game.turn; shownAt = Date.now();
     req.on("close", () => watchers.delete(res));
     return;
@@ -315,7 +317,7 @@ process.on("SIGTERM", () => process.exit(0));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 for (;;) {
   if (!watchers.size) { await sleep(400); continue; }
-  if (game.turn > shown && Date.now() - shownAt < 4000) { await sleep(15); continue; } // one turn ahead of the page is enough
+  if (game.turn >= shown + ahead && Date.now() - shownAt < 4000) { await sleep(15); continue; } // far enough ahead of the page
   let message;
   try { message = await turn(); } catch (error) { message = { type: "waiting", reason: `Jeview is not answering at ${proxy}: ${(error as Error).message}` }; }
   broadcast(message ?? { type: "waiting", reason: "Jev did not answer. Is a Jev key set in Jeview's settings?" });

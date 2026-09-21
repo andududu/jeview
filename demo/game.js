@@ -3,7 +3,7 @@ const W = 320, H = 180, T = 16, GROUND = 146, STEP = 240, TILE = 105, JUMP = 320
 const canvas = document.getElementById("game"), ctx = canvas.getContext("2d");
 const $ = (id) => document.getElementById(id);
 
-const game = { scene: null, x: 1, hud: null, anim: null, queue: [], cam: 0, particles: [], floaters: [], waiting: null, told: 0 };
+const game = { scene: null, x: 1, hud: null, anim: null, queue: [], cam: 0, particles: [], floaters: [], waiting: null, told: 0, ahead: 3 };
 
 // ---------- pixel art ----------
 const C = {
@@ -154,7 +154,7 @@ function begin(message) {
   fetch(`/shown?turn=${message.turn}`, { method: "POST" }).catch(() => {}); // the game works out the next turn meanwhile
   const move = message.button === "run" ? Math.max(STEP, Math.abs(message.to - message.from) * TILE) : message.button === "jump" ? JUMP : STEP;
   game.anim = { move,
-    message, start: performance.now(), done: false, effects: false, speed: 1 + Math.min(2, game.queue.length * 0.7), // quicker when turns queue up
+    message, start: performance.now(), done: false, effects: false, speed: 1 + Math.min(2, Math.max(0, game.queue.length - game.ahead) * 0.6), // quicker only when more turns wait than the game works ahead
     before: new Map((before?.mobs ?? []).map((m) => [m.id, m])), coins: new Set(before?.coins ?? []), highCoins: new Set(before?.highCoins ?? []),
     end: move + (message.fell ? 420 : message.hurt ? 300 : message.x !== message.to ? 180 : 0),
   };
@@ -289,7 +289,7 @@ const events = new EventSource("/events");
 events.onmessage = (event) => {
   const message = JSON.parse(event.data);
   if (message.type === "hello") {
-    game.scene = message.scene; game.x = message.x; showHud(message.hud);
+    game.scene = message.scene; game.x = message.x; showHud(message.hud); game.ahead = message.ahead ?? 3;
     $("jeview").href = message.jeview;
   } else if (message.type === "waiting") {
     game.waiting = message.reason; banner("WAITING FOR JEV", message.reason); $("said").textContent = message.reason;
