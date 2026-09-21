@@ -24,7 +24,8 @@ Needs Node 24 or later, and nothing else: Jeview has no dependencies to install.
 ```
 
 That finds a suitable Node (on your PATH, or installed by nvm or Homebrew), starts Jeview and opens the viewer at
-http://127.0.0.1:4777/. `npm start` does the same without opening a browser. Add your TypeSafe API key (the key icon,
+http://127.0.0.1:4777/ (or http://jeview.localhost:4777/, a name your browser already knows). `npm start` does the same
+without opening a browser. Add your TypeSafe API key (the key icon,
 top right). The first time you open it, the viewer explains itself.
 
 ## See it working
