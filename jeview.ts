@@ -1,4 +1,4 @@
-// Jeview: a local middleman for Jev with a live view of every call (README.md).
+// Jeview: a local visualizer for Jev, with a live view of every call (README.md).
 //   node jeview.ts [--port 4777] [--dir ~/.local/share/jeview]
 // Open http://127.0.0.1:4777/, add your Jev key (the key icon), and send Jev requests to http://127.0.0.1:4777/v1/systemone
 // (or /<label>/v1/systemone) instead of https://api.typesafe.ai/v1/systemone. --jev-endpoint points it at a local mock.

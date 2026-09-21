@@ -2,7 +2,7 @@
   "name": "jeview",
   "version": "0.1.0",
   "private": true,
-  "description": "An unofficial local middleman for Jev (TypeSafe), with a live view of every call.",
+  "description": "An unofficial local visualizer for Jev (TypeSafe), with a live view of every call.",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/andududu/jeview.git" },
   "type": "module",

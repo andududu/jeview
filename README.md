@@ -2,8 +2,8 @@
 
 > Agents: [llms.txt](llms.txt) says how to use a running Jeview, and [AGENTS.md](AGENTS.md) how to work on this repository.
 
-An unofficial local middleman for Jev ([TypeSafe](https://typesafe.ai) System One), with a live view of every call.
-Jeview is an independent project: it is not made or endorsed by TypeSafe.
+An unofficial local visualizer for Jev ([TypeSafe](https://typesafe.ai) System One): a live view of every call your code
+makes. Jeview is an independent project. It is not affiliated with TypeSafe AI, nor made or endorsed by it.
 
 ```
 your code  →  Jeview (127.0.0.1:4777)  →  TypeSafe (api.typesafe.ai)
